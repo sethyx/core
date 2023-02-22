@@ -1,0 +1,13 @@
+{
+  "domain": "biactrl",
+  "name": "BiaControl",
+  "codeowners": ["@sethyx"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://www.home-assistant.io/integrations/biactrl",
+  "homekit": {},
+  "iot_class": "local_polling",
+  "requirements": [],
+  "ssdp": [],
+  "zeroconf": []
+}

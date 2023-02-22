@@ -140,6 +140,8 @@ build.json @home-assistant/supervisor
 /homeassistant/components/bayesian/ @HarvsG
 /tests/components/bayesian/ @HarvsG
 /homeassistant/components/beewi_smartclim/ @alemuro
+/homeassistant/components/biactrl/ @sethyx
+/tests/components/biactrl/ @sethyx
 /homeassistant/components/binary_sensor/ @home-assistant/core
 /tests/components/binary_sensor/ @home-assistant/core
 /homeassistant/components/bizkaibus/ @UgaitzEtxebarria

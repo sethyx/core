@@ -526,6 +526,12 @@
       "config_flow": false,
       "iot_class": "local_polling"
     },
+    "biactrl": {
+      "name": "BiaControl",
+      "integration_type": "hub",
+      "config_flow": true,
+      "iot_class": "local_polling"
+    },
     "bitcoin": {
       "name": "Bitcoin",
       "integration_type": "hub",

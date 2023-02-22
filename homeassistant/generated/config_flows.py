@@ -57,6 +57,7 @@ FLOWS = {
         "azure_event_hub",
         "baf",
         "balboa",
+        "biactrl",
         "blebox",
         "blink",
         "bluemaestro",
