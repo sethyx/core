@@ -3632,6 +3632,12 @@
       "config_flow": true,
       "iot_class": "local_push"
     },
+    "ngbs_icon": {
+      "name": "NGBS iCON",
+      "integration_type": "hub",
+      "config_flow": true,
+      "iot_class": "cloud_polling"
+    },
     "nibe_heatpump": {
       "name": "Nibe Heat Pump",
       "integration_type": "hub",
