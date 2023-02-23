@@ -1,4 +1,4 @@
-"""The BiaControl integration."""
+"""The iCON integration."""
 from __future__ import annotations
 
 from datetime import timedelta
@@ -6,15 +6,15 @@ import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, Platform
+from homeassistant.const import CONF_EMAIL, CONF_ID, CONF_PASSWORD, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .icon import get_devices
 from .const import DOMAIN
+from .icon import poll_api
 
-PLATFORMS: list[Platform] = [Platform.CLIMATE]
+PLATFORMS: list[Platform] = [Platform.CLIMATE, Platform.SENSOR, Platform.BINARY_SENSOR]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,9 +22,8 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Async setup entry."""
     hass.data.setdefault(DOMAIN, {})
-    host = entry.data[CONF_HOST]
 
-    coordinator = IconDataUpdateCoordinator(hass, host)
+    coordinator = IconDataUpdateCoordinator(hass, entry.data)
     await coordinator.async_config_entry_first_refresh()
 
     entry.async_on_unload(entry.add_update_listener(update_listener))
@@ -54,17 +53,23 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 class IconDataUpdateCoordinator(DataUpdateCoordinator[list[dict[str, Any]]]):
     """Coordinator class."""
 
-    def __init__(self, hass, host):
+    def __init__(self, hass: HomeAssistant, data) -> None:
         """Initialize."""
+        _LOGGER.warning("############## updatecoord init")
         self._hass = hass
-        self._host = host
+        self._email = data[CONF_EMAIL]
+        self._password = data[CONF_PASSWORD]
+        self._id = data[CONF_ID]
         self._devices: list[dict[str, Any]] | None = None
-        update_interval = timedelta(seconds=5)
+        update_interval = timedelta(seconds=10)
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=update_interval)
 
     async def _async_update_data(self):
-        result = await get_devices(
-            self._host, aiohttp_client.async_get_clientsession(self._hass)
+        result = await poll_api(
+            aiohttp_client.async_get_clientsession(self._hass),
+            self._email,
+            self._password,
+            self._id,
         )
         if result:
             self._devices = result

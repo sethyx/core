@@ -1,70 +1,91 @@
-"""Cover module."""
+"""Climate module."""
 from typing import Any
 
-from homeassistant.components.cover import (
-    CoverDeviceClass,
-    CoverEntity,
-    CoverEntityFeature,
+from homeassistant.components.climate import (
+    ATTR_CURRENT_HUMIDITY,
+    ATTR_CURRENT_TEMPERATURE,
+    ATTR_HVAC_ACTION,
+    ATTR_HVAC_MODE,
+    ATTR_PRESET_MODE,
+    ATTR_TEMPERATURE,
+    PRESET_COMFORT,
+    PRESET_ECO,
+    ClimateEntity,
+    ClimateEntityFeature,
+    HVACMode,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST
+from homeassistant.const import CONF_ID, CONF_NAME, Platform, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import BiaCtrlDataUpdateCoordinator
-from .biactrl import control_device
+from . import IconDataUpdateCoordinator
 from .const import DOMAIN
+from .icon import set_ce_mode, set_hc_mode, set_temperature
 
-DEVICE_CLASS_MAP = {"cover": CoverDeviceClass.SHUTTER}
-
-SUPPORTED_SENSORS = {"cover"}
+SUPPORTED_SENSORS = {Platform.CLIMATE}
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Async setup entry."""
-    host: str = entry.data[CONF_HOST]
-    coordinator: BiaCtrlDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    icon_id: str = entry.data[CONF_ID]
+    coordinator: IconDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        Device(hass, host, device, coordinator)
+        ClimateDevice(hass, icon_id, device, coordinator)
         for device in coordinator.data
         if device["type"] in SUPPORTED_SENSORS
     )
 
 
-class Device(CoordinatorEntity[BiaCtrlDataUpdateCoordinator], CoverEntity):
-    """Cover device class."""
+class ClimateDevice(CoordinatorEntity[IconDataUpdateCoordinator], ClimateEntity):
+    """Climate device class."""
 
     def __init__(
         self,
         hass: HomeAssistant,
-        host: str,
+        icon_id: str,
         device: dict[str, Any],
-        coordinator: BiaCtrlDataUpdateCoordinator,
+        coordinator: IconDataUpdateCoordinator,
     ) -> None:
-        """Initialize the cover."""
+        """Initialize the thermostat."""
         super().__init__(coordinator)
+        self._icon_id = icon_id
         self._session = aiohttp_client.async_get_clientsession(hass)
-        self._host = host
-        self._attr_name = device["name"]
-        self._attr_unique_id = device["id"]
-        self._attr_is_closed = True
+        self._attr_name = device[CONF_NAME]
+        self._attr_target_temperature_step = 0.5
+        self._attr_temperature_unit = UnitOfTemperature.CELSIUS
+        self._attr_unique_id = device[CONF_ID]
+        self._attr_current_temperature = device[ATTR_CURRENT_TEMPERATURE]
+        self._attr_current_humidity = device[ATTR_CURRENT_HUMIDITY]
+        self._attr_target_temperature = device["target_temperature"]
+        self._attr_max_temp = device["target_temperature_max"]
+        self._attr_min_temp = device["target_temperature_min"]
+        self._attr_preset_mode = device[ATTR_PRESET_MODE]
+        self._attr_preset_modes = [PRESET_ECO, PRESET_COMFORT]
+        self._attr_hvac_action = device[ATTR_HVAC_ACTION]
+        self._attr_hvac_mode = device[ATTR_HVAC_MODE]
         self._attr_device_info = DeviceInfo(
             identifiers={
-                (DOMAIN, device["id"]),
+                (DOMAIN, device[CONF_ID]),
             },
-            manufacturer="BiaHome",
+            manufacturer="NGBS",
             model=device["type"],
             name=self.name,
         )
+
         self._attr_supported_features = (
-            CoverEntityFeature.CLOSE | CoverEntityFeature.OPEN | CoverEntityFeature.STOP
+            ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
         )
-        self._attr_device_class = DEVICE_CLASS_MAP[device["type"]]
+        if device["hc_controller"]:
+            self._attr_hvac_modes = [HVACMode.COOL, HVACMode.HEAT]
+        else:
+            self._attr_hvac_modes = [device[ATTR_HVAC_MODE]]
+        self._attr_device_class = Platform.CLIMATE
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -73,24 +94,23 @@ class Device(CoordinatorEntity[BiaCtrlDataUpdateCoordinator], CoverEntity):
             (
                 device
                 for device in self.coordinator.data
-                if device["id"] == self.unique_id
+                if device[CONF_ID] == self.unique_id
             ),
             None,
         )
-        if device is not None and "state" in device:
-            state = device["state"]
-            if state == "opening":
-                self._attr_is_opening = True
-                self._attr_is_closing = False
-                self._attr_is_closed = False
-            elif state == "closing":
-                self._attr_is_opening = False
-                self._attr_is_closing = True
-                self._attr_is_closed = False
+        if device is not None:
+            self._attr_current_temperature = device[ATTR_CURRENT_TEMPERATURE]
+            self._attr_current_humidity = device[ATTR_CURRENT_HUMIDITY]
+            self._attr_target_temperature = device["target_temperature"]
+            self._attr_target_temperature_high = device["target_temperature_max"]
+            self._attr_target_temperature_low = device["target_temperature_min"]
+            self._attr_preset_mode = device[ATTR_PRESET_MODE]
+            self._attr_hvac_action = device[ATTR_HVAC_ACTION]
+            self._attr_hvac_mode = device[ATTR_HVAC_MODE]
+            if device["hc_controller"]:
+                self._attr_hvac_modes = [HVACMode.COOL, HVACMode.HEAT]
             else:
-                self._attr_is_opening = False
-                self._attr_is_closing = False
-                self._attr_is_closed = state == "closed"
+                self._attr_hvac_modes = [device[ATTR_HVAC_MODE]]
         super()._handle_coordinator_update()
 
     async def async_added_to_hass(self) -> None:
@@ -98,27 +118,22 @@ class Device(CoordinatorEntity[BiaCtrlDataUpdateCoordinator], CoverEntity):
         await super().async_added_to_hass()
         self._handle_coordinator_update()
 
-    async def async_open_cover(self, **kwargs: Any) -> None:
-        """Open the cover."""
-        await self.async_control_cover(cmd="open")
-        self._attr_is_closed = False
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        """Set new target hvac mode."""
+        await set_hc_mode(self._session, self._icon_id, self._attr_unique_id, hvac_mode)
 
-    async def async_close_cover(self, **kwargs: Any) -> None:
-        """Close the cover."""
-        await self.async_control_cover(cmd="close")
-
-    async def async_stop_cover(self, **kwargs: Any) -> None:
-        """Stop the cover."""
-        self._attr_current_cover_position = 50
-        await self.async_control_cover(cmd="stop")
-
-    async def async_control_cover(self, cmd: str) -> None:
-        """Control the cover."""
-        await control_device(
-            self._session,
-            self._host,
-            "cover",
-            self.unique_id,
-            cmd,
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Set new target preset mode."""
+        await set_ce_mode(
+            self._session, self._icon_id, self._attr_unique_id, preset_mode
         )
-        await self.coordinator.async_request_refresh()
+
+    async def async_set_temperature(self, **kwargs: Any) -> None:
+        """Set new target temperature."""
+        if ATTR_TEMPERATURE not in kwargs:
+            raise ValueError(f"Missing parameter {ATTR_TEMPERATURE}")
+
+        temperature = kwargs[ATTR_TEMPERATURE]
+        await set_temperature(
+            self._session, self._icon_id, self._attr_unique_id, temperature
+        )

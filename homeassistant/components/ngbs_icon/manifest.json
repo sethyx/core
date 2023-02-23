@@ -1,12 +1,12 @@
 {
-  "domain": "biactrl",
-  "name": "BiaControl",
+  "domain": "ngbs_icon",
+  "name": "NGBS iCON",
   "codeowners": ["@sethyx"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://www.home-assistant.io/integrations/biactrl",
+  "documentation": "https://www.home-assistant.io/integrations/ngbs_icon",
   "homekit": {},
-  "iot_class": "local_polling",
+  "iot_class": "cloud_polling",
   "requirements": [],
   "ssdp": [],
   "zeroconf": []

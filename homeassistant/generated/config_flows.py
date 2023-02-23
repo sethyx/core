@@ -283,6 +283,7 @@ FLOWS = {
         "nexia",
         "nextdns",
         "nfandroidtv",
+        "ngbs_icon",
         "nibe_heatpump",
         "nightscout",
         "nina",

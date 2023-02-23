@@ -1,3 +1,3 @@
 """Constants for the BiaControl integration."""
 
-DOMAIN = "biactrl"
+DOMAIN = "ngbs_icon"
