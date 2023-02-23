@@ -24,7 +24,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import IconDataUpdateCoordinator
 from .const import DOMAIN
-from .icon import set_ce_mode, set_hc_mode, set_temperature
 
 SUPPORTED_SENSORS = {Platform.CLIMATE}
 
@@ -120,20 +119,21 @@ class ClimateDevice(CoordinatorEntity[IconDataUpdateCoordinator], ClimateEntity)
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""
-        await set_hc_mode(self._session, self._icon_id, self._attr_unique_id, hvac_mode)
+        if len(self._attr_hvac_modes) > 1 and self._attr_hvac_mode != hvac_mode:
+            await self.coordinator.api.set_hc_mode(self._attr_unique_id, hvac_mode)
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Set new target preset mode."""
-        await set_ce_mode(
-            self._session, self._icon_id, self._attr_unique_id, preset_mode
-        )
+        if self._attr_preset_mode != preset_mode:
+            await self.coordinator.api.set_ce_mode(self._attr_unique_id, preset_mode)
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
         if ATTR_TEMPERATURE not in kwargs:
             raise ValueError(f"Missing parameter {ATTR_TEMPERATURE}")
 
-        temperature = kwargs[ATTR_TEMPERATURE]
-        await set_temperature(
-            self._session, self._icon_id, self._attr_unique_id, temperature
-        )
+        target_temperature = kwargs[ATTR_TEMPERATURE]
+        if self._attr_target_temperature != target_temperature:
+            await self.coordinator.api.set_temperature(
+                self._attr_unique_id, target_temperature
+            )

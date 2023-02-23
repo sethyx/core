@@ -11,73 +11,146 @@ AUTH_URL = "http://www.enzoldhazam.hu"
 LIST_URL = "https://www.enzoldhazam.hu/Ax?action=iconList"
 DEVICE_POLL_URL = "https://www.enzoldhazam.hu/Ax?action=iconByID&serial="
 CONTROL_URL = "http://www.enzoldhazam.hu/Ax"
+LOGOUT_URL = "http://www.enzoldhazam.hu/logout"
 
 
-async def _logout(session: aiohttp.ClientSession) -> None:
-    async with session.get("http://www.enzoldhazam.hu/logout") as resp:
-        await resp.text()
+class IconClient:
+    """Class to handle iCON client connections."""
 
+    def __init__(self, session: aiohttp.ClientSession, email, password, xid) -> None:
+        """Initialize client."""
+        self.session = session
+        self.email = email
+        self.password = password
+        self.xid = xid
+        self.logged_in = False
 
-async def login(
-    session: aiohttp.ClientSession, email: str, password: str, xid: str
-) -> int:
-    """Login on API endpoint."""
-    async with session.get("http://www.enzoldhazam.hu") as resp:
-        _LOGGER.info("Login step 1 - %s", resp.status)
-        html_data = await resp.text()
-        # _LOGGER.info(html_data)
-        token_pos = html_data.find("token")
-        sub_data = html_data[token_pos : token_pos + 100]
-        token = re.findall(r"\d+", sub_data)
-        if len(token) < 1:
-            # most likely stuck session, logout
-            await _logout(session)
-            return 500
-        _LOGGER.info("Token: %s", token)
+    async def logout(self) -> None:
+        """Logout from API endpoint."""
+        async with self.session.get(LOGOUT_URL) as resp:
+            self.logged_in = False
+            await resp.text()
 
-        form_data = aiohttp.FormData()
-        form_data.add_field("username", email)
-        form_data.add_field("password", password)
-        form_data.add_field("token", token)
-        async with session.post(AUTH_URL, data=form_data) as resp:
-            #  this will be a 302
-            data = await resp.text()
-            _LOGGER.info("Login step 2 - %s", resp.status)
-            _LOGGER.info(data)
+    async def login(self) -> None:
+        """Login on API endpoint."""
+        async with self.session.get(AUTH_URL) as resp:
+            _LOGGER.info("Login step 1 - %s", resp.status)
+            html_data = await resp.text()
+            # _LOGGER.info(html_data)
+            token_pos = html_data.find("token")
+            sub_data = html_data[token_pos : token_pos + 100]
+            token = re.findall(r"\d+", sub_data)
+            if len(token) < 1:
+                # most likely stuck session, logout
+                raise LogoutNeededError
+            _LOGGER.info("Token: %s", token)
 
-        async with session.get(LIST_URL) as resp:
-            _LOGGER.info("Login step 3 - %s", resp.status)
-            if resp.status == 200:
+            form_data = aiohttp.FormData()
+            form_data.add_field("username", self.email)
+            form_data.add_field("password", self.password)
+            form_data.add_field("token", token)
+            async with self.session.post(AUTH_URL, data=form_data) as resp:
+                #  this will be a 302
                 data = await resp.text()
+                _LOGGER.info("Login step 2 - %s", resp.status)
                 _LOGGER.info(data)
+
+            async with self.session.get(LIST_URL) as resp:
+                _LOGGER.info("Login step 3 - %s", resp.status)
+                if resp.status == 200:
+                    data = await resp.text()
+                    _LOGGER.info(data)
+                    try:
+                        json_data = json.loads(data)
+                    except json.decoder.JSONDecodeError as exc:
+                        _LOGGER.warning(
+                            "Non-JSON, most likely not logged in: %s", exc_info=exc
+                        )
+                        raise UnauthorizedError from exc
+                    # _LOGGER.info(json_data)
+                    icon_match = _get_icon_match_from_login(json_data, self.xid)
+                    if not icon_match:
+                        self.logged_in = False
+                        raise InvalidIDError
+                    _LOGGER.info("ICON ID %s found in response", self.xid)
+                    online = _get_online_from_login(json_data, self.xid)
+                    if not online:
+                        self.logged_in = False
+                        raise IconOfflineError
+                    _LOGGER.info("ICON is online")
+                    self.logged_in = True
+                    return
+                self.logged_in = False
+                raise CannotConnect
+
+    async def poll_api(self):
+        """Get all devices."""
+        _LOGGER.info("Polling NGBS")
+        async with self.session.get(f"{DEVICE_POLL_URL}{self.xid}") as resp:
+            _LOGGER.info("Poll response code: %s", resp.status)
+            data = await resp.text()
+            _LOGGER.info(data)
+            try:
                 json_data = json.loads(data)
                 # _LOGGER.info(json_data)
-                icon_match = _get_icon_match_from_login(json_data, xid)
-                if not icon_match:
-                    return 404
-                _LOGGER.info("ICON ID %s found in response", xid)
-                online = _get_online_from_login(json_data, xid)
-                if not online:
-                    return 503
-                _LOGGER.info("ICON is online")
-                return 200
-            return 500
+                return _generate_devices(json_data)
+            except json.decoder.JSONDecodeError as exc:
+                _LOGGER.warning("Non-JSON, most likely not logged in: %s", exc_info=exc)
+                self.logged_in = False
+                await self.login()
+                return False
 
+    async def set_hc_mode(self, xtid, h_c: str):
+        """Set heating/cooling mode."""
+        form_data = aiohttp.FormData()
+        form_data.add_field("action", "setIcon")
+        form_data.add_field("attr", "HC")
+        form_data.add_field("icon", self.xid)
+        form_data.add_field("value", 1 if h_c == "cool" else 0)
+        _LOGGER.info("Control HC mode: %s %s %s", self.xid, xtid, h_c)
+        async with self.session.post(CONTROL_URL, data=form_data) as resp:
+            result = resp.status
+            if result == 200:
+                data = await resp.text()
+                json_data = json.loads(data)
+                _LOGGER.info(json_data)
+                return _verify_set_response(json_data)
+            return False
 
-async def poll_api(session: aiohttp.ClientSession, email: str, password: str, xid: str):
-    """Get all devices."""
-    _LOGGER.info("Polling NGBS")
-    async with session.get(f"{DEVICE_POLL_URL}{xid}") as resp:
-        _LOGGER.info("Poll response code: %s", resp.status)
-        data = await resp.text()
-        _LOGGER.info(data)
-        try:
-            json_data = json.loads(data)
-            # _LOGGER.info(json_data)
-            return _generate_devices(json_data)
-        except json.decoder.JSONDecodeError as exc:
-            _LOGGER.warning("Non-JSON, most likely not logged in: %s", exc_info=exc)
-            await login(session, email, password, xid)
+    async def set_ce_mode(self, xtid, c_e: str):
+        """Set temperature of thermostat."""
+        form_data = aiohttp.FormData()
+        form_data.add_field("action", "setThermostat")
+        form_data.add_field("attr", "CE")
+        form_data.add_field("icon", self.xid)
+        form_data.add_field("thermostat", xtid)
+        form_data.add_field("value", 1 if c_e == "eco" else 0)
+        _LOGGER.info("Control CE mode: %s %s %s", self.xid, xtid, c_e)
+        async with self.session.post(CONTROL_URL, data=form_data) as resp:
+            result = resp.status
+            if result == 200:
+                data = await resp.text()
+                json_data = json.loads(data)
+                _LOGGER.info(json_data)
+                return _verify_set_response(json_data)
+            return False
+
+    async def set_temperature(self, xtid, temp: int):
+        """Set temperature of thermostat."""
+        form_data = aiohttp.FormData()
+        form_data.add_field("action", "setThermostat")
+        form_data.add_field("attr", "REQ")
+        form_data.add_field("icon", self.xid)
+        form_data.add_field("thermostat", xtid)
+        form_data.add_field("value", temp)
+        _LOGGER.info("Control thermostat temp: %s %s %s", self.xid, xtid, temp)
+        async with self.session.post(CONTROL_URL, data=form_data) as resp:
+            result = resp.status
+            if result == 200:
+                data = await resp.text()
+                json_data = json.loads(data)
+                _LOGGER.info(json_data)
+                return _verify_set_response(json_data)
             return False
 
 
@@ -149,57 +222,21 @@ def _verify_set_response(data: dict) -> bool:
     return data["WRITE"]["status"] == 1
 
 
-async def set_hc_mode(session: aiohttp.ClientSession, xid: str, xtid, h_c: str):
-    """Set heating/cooling mode."""
-    form_data = aiohttp.FormData()
-    form_data.add_field("action", "setIcon")
-    form_data.add_field("attr", "HC")
-    form_data.add_field("icon", xid)
-    form_data.add_field("value", 1 if h_c == "cool" else 0)
-    _LOGGER.info("Control HC mode: %s %s %s", xid, xtid, h_c)
-    async with session.post(CONTROL_URL, data=form_data) as resp:
-        result = resp.status
-        if result == 200:
-            data = await resp.text()
-            json_data = json.loads(data)
-            _LOGGER.info(json_data)
-            return _verify_set_response(json_data)
-        return False
+class CannotConnect(Exception):
+    """Error to indicate we cannot connect."""
 
 
-async def set_ce_mode(session: aiohttp.ClientSession, xid: str, xtid, c_e: str):
-    """Set temperature of thermostat."""
-    form_data = aiohttp.FormData()
-    form_data.add_field("action", "setThermostat")
-    form_data.add_field("attr", "CE")
-    form_data.add_field("icon", xid)
-    form_data.add_field("thermostat", xtid)
-    form_data.add_field("value", 1 if c_e == "eco" else 0)
-    _LOGGER.info("Control CE mode: %s %s %s", xid, xtid, c_e)
-    async with session.post(CONTROL_URL, data=form_data) as resp:
-        result = resp.status
-        if result == 200:
-            data = await resp.text()
-            json_data = json.loads(data)
-            _LOGGER.info(json_data)
-            return _verify_set_response(json_data)
-        return False
+class UnauthorizedError(Exception):
+    """Error to indicate we cannot authorize."""
 
 
-async def set_temperature(session: aiohttp.ClientSession, xid: str, xtid, temp: int):
-    """Set temperature of thermostat."""
-    form_data = aiohttp.FormData()
-    form_data.add_field("action", "setThermostat")
-    form_data.add_field("attr", "REQ")
-    form_data.add_field("icon", xid)
-    form_data.add_field("thermostat", xtid)
-    form_data.add_field("value", temp)
-    _LOGGER.info("Control thermostat temp: %s %s %s", xid, xtid, temp)
-    async with session.post(CONTROL_URL, data=form_data) as resp:
-        result = resp.status
-        if result == 200:
-            data = await resp.text()
-            json_data = json.loads(data)
-            _LOGGER.info(json_data)
-            return _verify_set_response(json_data)
-        return False
+class InvalidIDError(Exception):
+    """Error to indicate we cannot find a system ID."""
+
+
+class LogoutNeededError(Exception):
+    """Error to indicate we need to logout the session."""
+
+
+class IconOfflineError(Exception):
+    """Error to indicate the device is offline."""

@@ -12,7 +12,7 @@ from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN
-from .icon import poll_api
+from .icon import IconClient
 
 PLATFORMS: list[Platform] = [Platform.CLIMATE, Platform.SENSOR, Platform.BINARY_SENSOR]
 
@@ -23,7 +23,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Async setup entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    coordinator = IconDataUpdateCoordinator(hass, entry.data)
+    session = aiohttp_client.async_get_clientsession(hass)
+    api = IconClient(
+        session, entry.data[CONF_EMAIL], entry.data[CONF_PASSWORD], entry.data[CONF_ID]
+    )
+
+    coordinator = IconDataUpdateCoordinator(hass, api, entry.data)
     await coordinator.async_config_entry_first_refresh()
 
     entry.async_on_unload(entry.add_update_listener(update_listener))
@@ -53,27 +58,19 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 class IconDataUpdateCoordinator(DataUpdateCoordinator[list[dict[str, Any]]]):
     """Coordinator class."""
 
-    def __init__(self, hass: HomeAssistant, data) -> None:
+    def __init__(self, hass: HomeAssistant, api: IconClient, data) -> None:
         """Initialize."""
-        _LOGGER.warning("############## updatecoord init")
-        self._hass = hass
-        self._email = data[CONF_EMAIL]
-        self._password = data[CONF_PASSWORD]
-        self._id = data[CONF_ID]
-        self._devices: list[dict[str, Any]] | None = None
+        self.api = api
+        self.hass = hass
+        self.devices: list[dict[str, Any]] | None = None
         update_interval = timedelta(seconds=10)
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=update_interval)
 
     async def _async_update_data(self):
-        result = await poll_api(
-            aiohttp_client.async_get_clientsession(self._hass),
-            self._email,
-            self._password,
-            self._id,
-        )
+        result = await self.api.poll_api()
         if result:
-            self._devices = result
+            self.devices = result
         else:
             raise UpdateFailed()
 
-        return self._devices
+        return self.devices
