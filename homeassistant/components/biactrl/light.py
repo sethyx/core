@@ -20,6 +20,8 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+DELAY_BEFORE_UPDATE = 1
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -85,7 +87,7 @@ class Device(CoordinatorEntity[BiaCtrlDataUpdateCoordinator], LightEntity):
         await control_device(
             self._session, self._host, "light", self._attr_unique_id, "on"
         )
-        await asyncio.sleep(2)
+        await asyncio.sleep(DELAY_BEFORE_UPDATE)
         _LOGGER.info("In light turn on")
         await self.coordinator.async_request_refresh()
 
@@ -95,5 +97,5 @@ class Device(CoordinatorEntity[BiaCtrlDataUpdateCoordinator], LightEntity):
             self._session, self._host, "light", self._attr_unique_id, "off"
         )
         _LOGGER.info("In light turn off")
-        await asyncio.sleep(2)
+        await asyncio.sleep(DELAY_BEFORE_UPDATE)
         await self.coordinator.async_request_refresh()
