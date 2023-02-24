@@ -23,11 +23,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Async setup entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    session = aiohttp_client.async_get_clientsession(hass)
+    session = aiohttp_client.async_create_clientsession(hass)
     api = IconClient(
         session, entry.data[CONF_EMAIL], entry.data[CONF_PASSWORD], entry.data[CONF_ID]
     )
-
+    await api.login()
     coordinator = IconDataUpdateCoordinator(hass, api, entry.data)
     await coordinator.async_config_entry_first_refresh()
 

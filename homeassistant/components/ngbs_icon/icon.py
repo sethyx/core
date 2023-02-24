@@ -85,7 +85,9 @@ class IconClient:
 
     async def poll_api(self):
         """Get all devices."""
+
         _LOGGER.info("Polling NGBS")
+
         async with self.session.get(f"{DEVICE_POLL_URL}{self.xid}") as resp:
             _LOGGER.info("Poll response code: %s", resp.status)
             data = await resp.text()

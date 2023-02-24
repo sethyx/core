@@ -43,7 +43,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input=None) -> FlowResult:
         """Show the setup form to the user."""
 
-        session = aiohttp_client.async_get_clientsession(self.hass)
+        session = aiohttp_client.async_create_clientsession(self.hass)
 
         errors = {}
 
