@@ -54,7 +54,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 class BiaCtrlDataUpdateCoordinator(DataUpdateCoordinator[list[dict[str, Any]]]):
     """Coordinator class."""
 
-    def __init__(self, hass, host):
+    def __init__(self, hass: HomeAssistant, host) -> None:
         """Initialize."""
         self._hass = hass
         self._host = host
