@@ -1,6 +1,7 @@
 """Light module."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -84,6 +85,7 @@ class Device(CoordinatorEntity[BiaCtrlDataUpdateCoordinator], LightEntity):
         await control_device(
             self._session, self._host, "light", self._attr_unique_id, "on"
         )
+        await asyncio.sleep(2)
         _LOGGER.info("In light turn on")
         await self.coordinator.async_request_refresh()
 
@@ -93,4 +95,5 @@ class Device(CoordinatorEntity[BiaCtrlDataUpdateCoordinator], LightEntity):
             self._session, self._host, "light", self._attr_unique_id, "off"
         )
         _LOGGER.info("In light turn off")
+        await asyncio.sleep(2)
         await self.coordinator.async_request_refresh()

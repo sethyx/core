@@ -37,51 +37,50 @@ class IconClient:
             _LOGGER.info("Login step 1 - %s", resp.status)
             html_data = await resp.text()
             # _LOGGER.info(html_data)
-            token_pos = html_data.find("token")
-            sub_data = html_data[token_pos : token_pos + 100]
-            token = re.findall(r"\d+", sub_data)
-            if len(token) < 1:
-                # most likely stuck session, logout
-                raise LogoutNeededError
-            _LOGGER.info("Token: %s", token)
+        token_pos = html_data.find("token")
+        sub_data = html_data[token_pos : token_pos + 100]
+        token = re.findall(r"\d+", sub_data)
+        if len(token) < 1:
+            # most likely stuck session, logout
+            await self.logout()
+            raise LogoutNeededError
+        _LOGGER.info("Token: %s", token)
 
-            form_data = aiohttp.FormData()
-            form_data.add_field("username", self.email)
-            form_data.add_field("password", self.password)
-            form_data.add_field("token", token)
-            async with self.session.post(AUTH_URL, data=form_data) as resp:
-                #  this will be a 302
+        form_data = aiohttp.FormData()
+        form_data.add_field("username", self.email)
+        form_data.add_field("password", self.password)
+        form_data.add_field("token", token)
+        async with self.session.post(AUTH_URL, data=form_data) as resp:
+            #  this will be a 302
+            data = await resp.text()
+            _LOGGER.info("Login step 2 - %s", resp.status)
+
+        async with self.session.get(LIST_URL) as resp:
+            _LOGGER.info("Login step 3 - %s", resp.status)
+            if resp.status == 200:
                 data = await resp.text()
-                _LOGGER.info("Login step 2 - %s", resp.status)
                 _LOGGER.info(data)
-
-            async with self.session.get(LIST_URL) as resp:
-                _LOGGER.info("Login step 3 - %s", resp.status)
-                if resp.status == 200:
-                    data = await resp.text()
-                    _LOGGER.info(data)
-                    try:
-                        json_data = json.loads(data)
-                    except json.decoder.JSONDecodeError as exc:
-                        _LOGGER.warning(
-                            "Non-JSON, most likely not logged in: %s", exc_info=exc
-                        )
-                        raise UnauthorizedError from exc
-                    # _LOGGER.info(json_data)
-                    icon_match = _get_icon_match_from_login(json_data, self.xid)
-                    if not icon_match:
-                        self.logged_in = False
-                        raise InvalidIDError
-                    _LOGGER.info("ICON ID %s found in response", self.xid)
-                    online = _get_online_from_login(json_data, self.xid)
-                    if not online:
-                        self.logged_in = False
-                        raise IconOfflineError
-                    _LOGGER.info("ICON is online")
-                    self.logged_in = True
-                    return
-                self.logged_in = False
-                raise CannotConnect
+                try:
+                    json_data = json.loads(data)
+                except json.decoder.JSONDecodeError as exc:
+                    _LOGGER.warning(
+                        "Non-JSON, most likely not logged in: %s", exc_info=exc
+                    )
+                    raise UnauthorizedError from exc
+                icon_match = _get_icon_match_from_login(json_data, self.xid)
+                if not icon_match:
+                    self.logged_in = False
+                    raise InvalidIDError
+                _LOGGER.info("ICON ID %s found in response", self.xid)
+                online = _get_online_from_login(json_data, self.xid)
+                if not online:
+                    self.logged_in = False
+                    raise IconOfflineError
+                _LOGGER.info("ICON is online")
+                self.logged_in = True
+                return
+            self.logged_in = False
+            raise CannotConnect
 
     async def poll_api(self):
         """Get all devices."""
