@@ -1,4 +1,5 @@
 """Climate module."""
+from asyncio import sleep
 from typing import Any
 
 from homeassistant.components.climate import (
@@ -121,11 +122,15 @@ class ClimateDevice(CoordinatorEntity[IconDataUpdateCoordinator], ClimateEntity)
         """Set new target hvac mode."""
         if len(self._attr_hvac_modes) > 1 and self._attr_hvac_mode != hvac_mode:
             await self.coordinator.api.set_hc_mode(self._attr_unique_id, hvac_mode)
+            await sleep(2)
+            await self.coordinator.async_request_refresh()
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Set new target preset mode."""
         if self._attr_preset_mode != preset_mode:
             await self.coordinator.api.set_ce_mode(self._attr_unique_id, preset_mode)
+            await sleep(2)
+            await self.coordinator.async_request_refresh()
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
@@ -137,3 +142,5 @@ class ClimateDevice(CoordinatorEntity[IconDataUpdateCoordinator], ClimateEntity)
             await self.coordinator.api.set_temperature(
                 self._attr_unique_id, target_temperature
             )
+            await sleep(2)
+            await self.coordinator.async_request_refresh()

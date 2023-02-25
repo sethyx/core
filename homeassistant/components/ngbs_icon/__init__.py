@@ -63,7 +63,7 @@ class IconDataUpdateCoordinator(DataUpdateCoordinator[list[dict[str, Any]]]):
         self.api = api
         self.hass = hass
         self.devices: list[dict[str, Any]] | None = None
-        update_interval = timedelta(seconds=5)
+        update_interval = timedelta(seconds=30)
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=update_interval)
 
     async def _async_update_data(self):

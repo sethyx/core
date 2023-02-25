@@ -1,4 +1,5 @@
 """Cover module."""
+from asyncio import sleep
 from typing import Any
 
 from homeassistant.components.cover import (
@@ -101,7 +102,6 @@ class Device(CoordinatorEntity[BiaCtrlDataUpdateCoordinator], CoverEntity):
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
         await self.async_control_cover(cmd="open")
-        self._attr_is_closed = False
 
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
@@ -110,6 +110,7 @@ class Device(CoordinatorEntity[BiaCtrlDataUpdateCoordinator], CoverEntity):
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
         await self.async_control_cover(cmd="stop")
+        self._attr_is_closed = not self._attr_is_closed
 
     async def async_control_cover(self, cmd: str) -> None:
         """Control the cover."""
@@ -120,4 +121,5 @@ class Device(CoordinatorEntity[BiaCtrlDataUpdateCoordinator], CoverEntity):
             self.unique_id,
             cmd,
         )
+        await sleep(1)
         await self.coordinator.async_request_refresh()
