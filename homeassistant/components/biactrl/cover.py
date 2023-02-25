@@ -110,7 +110,6 @@ class Device(CoordinatorEntity[BiaCtrlDataUpdateCoordinator], CoverEntity):
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
         await self.async_control_cover(cmd="stop")
-        self._attr_is_closed = not self._attr_is_closed
 
     async def async_control_cover(self, cmd: str) -> None:
         """Control the cover."""
