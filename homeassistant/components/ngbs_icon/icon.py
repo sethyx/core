@@ -198,7 +198,7 @@ def _generate_devices(data) -> list:
                 "id": therm.get("ID"),
                 "name": therm.get("title"),
                 "current_temperature": therm.get("TEMP"),
-                "current_humidity": therm.get("RH"),
+                "current_humidity": round(therm.get("RH")),
                 "target_temperature": therm.get("REQ"),
                 "target_temperature_max": therm.get("TMAX"),
                 "target_temperature_min": therm.get("TMIN"),
@@ -208,6 +208,15 @@ def _generate_devices(data) -> list:
                 "hc_controller": hc_controller,
             }
         )
+        devices.append(
+            {
+                "type": "sensor",
+                "id": "_".join([therm.get("ID"), "humidity"]),
+                "name": " ".join([therm.get("title"), "humidity"]),
+                "value": therm.get("RH"),
+            }
+        )
+    _LOGGER.info(devices)
     return devices
 
 
