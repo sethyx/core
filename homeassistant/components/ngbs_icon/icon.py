@@ -198,7 +198,7 @@ def _generate_devices(data) -> list:
                 "id": therm.get("ID"),
                 "name": therm.get("title"),
                 "current_temperature": therm.get("TEMP"),
-                "current_humidity": round(therm.get("RH")),
+                "current_humidity": therm.get("RH"),
                 "target_temperature": therm.get("REQ"),
                 "target_temperature_max": therm.get("TMAX"),
                 "target_temperature_min": therm.get("TMIN"),
