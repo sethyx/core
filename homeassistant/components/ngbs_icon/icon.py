@@ -216,6 +216,14 @@ def _generate_devices(data) -> list:
                 "value": therm.get("RH"),
             }
         )
+        devices.append(
+            {
+                "type": "sensor",
+                "id": "_".join([therm.get("ID"), "temperature"]),
+                "name": " ".join([therm.get("title"), "temperature"]),
+                "value": therm.get("TEMP"),
+            }
+        )
     _LOGGER.info(devices)
     return devices
 
