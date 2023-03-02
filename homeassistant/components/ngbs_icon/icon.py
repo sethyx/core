@@ -94,7 +94,13 @@ class IconClient:
             try:
                 json_data = json.loads(data)
                 # _LOGGER.info(json_data)
+                if json_data.get("code") in ["401", "403"]:
+                    _LOGGER.warning("Auth expired, logging out and in")
+                    self.logged_in = False
+                    await self.login()
+                    return False
                 return _generate_devices(json_data)
+
             except json.decoder.JSONDecodeError as exc:
                 _LOGGER.warning("Non-JSON, most likely not logged in: %s", exc_info=exc)
                 self.logged_in = False
