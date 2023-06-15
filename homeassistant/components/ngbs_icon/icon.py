@@ -44,7 +44,7 @@ class IconClient:
             # most likely stuck session, logout
             await self.logout()
             raise LogoutNeededError
-        _LOGGER.info("Token: %s", token)
+        _LOGGER.debug("Token: %s", token)
 
         form_data = aiohttp.FormData()
         form_data.add_field("username", self.email)
@@ -59,7 +59,7 @@ class IconClient:
             _LOGGER.info("Login step 3 - %s", resp.status)
             if resp.status == 200:
                 data = await resp.text()
-                _LOGGER.info(data)
+                _LOGGER.debug(data)
                 try:
                     json_data = json.loads(data)
                 except json.decoder.JSONDecodeError as exc:
@@ -90,7 +90,7 @@ class IconClient:
         async with self.session.get(f"{DEVICE_POLL_URL}{self.xid}") as resp:
             _LOGGER.info("Poll response code: %s", resp.status)
             data = await resp.text()
-            _LOGGER.info(data)
+            _LOGGER.debug(data)
             try:
                 json_data = json.loads(data)
                 # _LOGGER.info(json_data)
@@ -183,6 +183,14 @@ def _generate_devices(data) -> list:
             "is_on": data.get("ICON").get("PUMP") > 0,
         }
     )
+    devices.append(
+        {
+            "type": "binary_sensor",
+            "id": "connection",
+            "name": "System connected",
+            "is_on": data.get("ICON").get("ONLINE") > 0,
+        }
+    )
     # add thermostats
     for therm in data.get("ICON").get("DP"):
         hc_controller = therm.get("title") == master_name
@@ -230,7 +238,7 @@ def _generate_devices(data) -> list:
                 "value": therm.get("TEMP"),
             }
         )
-    _LOGGER.info(devices)
+    _LOGGER.debug(devices)
     return devices
 
 
