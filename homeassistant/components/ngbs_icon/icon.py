@@ -73,10 +73,7 @@ class IconClient:
                     raise InvalidIDError
                 _LOGGER.info("ICON ID %s found in response", self.xid)
                 online = _get_online_from_login(json_data, self.xid)
-                if not online:
-                    self.logged_in = False
-                    raise IconOfflineError
-                _LOGGER.info("ICON is online")
+                _LOGGER.info("ICON connected: %s", online)
                 self.logged_in = True
                 return
             self.logged_in = False
@@ -268,7 +265,3 @@ class InvalidIDError(Exception):
 
 class LogoutNeededError(Exception):
     """Error to indicate we need to logout the session."""
-
-
-class IconOfflineError(Exception):
-    """Error to indicate the device is offline."""
