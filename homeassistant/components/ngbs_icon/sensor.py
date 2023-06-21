@@ -52,14 +52,12 @@ class SensorDevice(CoordinatorEntity[IconDataUpdateCoordinator], SensorEntity):
         self._session = aiohttp_client.async_get_clientsession(hass)
         self._attr_name = device[CONF_NAME]
         self._attr_unique_id = device[CONF_ID]
-        self._attr_device_class = (
-            SensorDeviceClass.HUMIDITY
-            if "humidity" in device[CONF_ID]
-            else SensorDeviceClass.TEMPERATURE
-        )
-        self._attr_native_unit_of_measurement = (
-            PERCENTAGE if "humidity" in device[CONF_ID] else UnitOfTemperature.CELSIUS
-        )
+        self._attr_native_unit_of_measurement = PERCENTAGE
+        if "humidity" in device[CONF_ID]:
+            self._attr_device_class = SensorDeviceClass.HUMIDITY
+        if "temp" in device[CONF_ID]:
+            self._attr_device_class = SensorDeviceClass.TEMPERATURE
+            self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
         self._attr_native_value = device["value"]
         self._attr_device_info = DeviceInfo(
             identifiers={
