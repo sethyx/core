@@ -160,6 +160,20 @@ class IconClient:
 
 def _generate_devices(data) -> list:
     devices = []
+    online = data.get("ICON").get(
+        "ONLINE"
+    )  # can be both a bool and an int... great code NGBS
+    if not (online):
+        devices.append(
+            {
+                "type": "binary_sensor",
+                "id": "connection",
+                "name": "System connected",
+                "is_on": False,
+            }
+        )
+        _LOGGER.debug(devices)
+        return devices
     # main device
     master_name = data.get("ICON").get("HC_MASTERICON")
     # add sensors
@@ -211,6 +225,7 @@ def _generate_devices(data) -> list:
                 "current_temperature": therm.get("TEMP"),
                 "current_humidity": therm.get("RH"),
                 "target_temperature": therm.get("REQ"),
+                "dew_temperature": therm.get("DEW"),
                 "target_temperature_max": therm.get("TMAX"),
                 "target_temperature_min": therm.get("TMIN"),
                 "preset_mode": preset_mode,
