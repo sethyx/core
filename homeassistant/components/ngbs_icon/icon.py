@@ -202,6 +202,14 @@ def _generate_devices(data) -> list:
             "is_on": data.get("ICON").get("ONLINE") > 0,
         }
     )
+    devices.append(
+        {
+            "type": "sensor",
+            "id": "valve_state",
+            "name": "Valve state",
+            "value": data.get("ICON").get("AO"),
+        }
+    )
     # add thermostats
     for therm in data.get("ICON").get("DP"):
         hc_controller = therm.get("title") == master_name
@@ -225,7 +233,6 @@ def _generate_devices(data) -> list:
                 "current_temperature": therm.get("TEMP"),
                 "current_humidity": therm.get("RH"),
                 "target_temperature": therm.get("REQ"),
-                "dew_temperature": therm.get("DEW"),
                 "target_temperature_max": therm.get("TMAX"),
                 "target_temperature_min": therm.get("TMIN"),
                 "preset_mode": preset_mode,
@@ -248,6 +255,14 @@ def _generate_devices(data) -> list:
                 "id": "_".join([therm.get("ID"), "temperature"]),
                 "name": " ".join([therm.get("title"), "temperature"]),
                 "value": therm.get("TEMP"),
+            }
+        )
+        devices.append(
+            {
+                "type": "sensor",
+                "id": "_".join([therm.get("ID"), "dewpoint_temperature"]),
+                "name": " ".join([therm.get("title"), "dewpoint temperature"]),
+                "value": therm.get("DEW"),
             }
         )
     _LOGGER.debug(devices)
