@@ -1,4 +1,5 @@
 """Support for SwitchBot sensors."""
+
 from __future__ import annotations
 
 from homeassistant.components.bluetooth import async_last_service_info
@@ -8,7 +9,6 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
@@ -19,8 +19,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
-from .coordinator import SwitchbotDataUpdateCoordinator
+from .coordinator import SwitchbotConfigEntry, SwitchbotDataUpdateCoordinator
 from .entity import SwitchbotEntity
 
 PARALLEL_UPDATES = 0
@@ -28,7 +27,7 @@ PARALLEL_UPDATES = 0
 SENSOR_TYPES: dict[str, SensorEntityDescription] = {
     "rssi": SensorEntityDescription(
         key="rssi",
-        name="Bluetooth signal strength",
+        translation_key="bluetooth_signal",
         native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
@@ -37,7 +36,7 @@ SENSOR_TYPES: dict[str, SensorEntityDescription] = {
     ),
     "wifi_rssi": SensorEntityDescription(
         key="wifi_rssi",
-        name="Wi-Fi signal strength",
+        translation_key="wifi_signal",
         native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
@@ -46,7 +45,6 @@ SENSOR_TYPES: dict[str, SensorEntityDescription] = {
     ),
     "battery": SensorEntityDescription(
         key="battery",
-        name="Battery",
         native_unit_of_measurement=PERCENTAGE,
         device_class=SensorDeviceClass.BATTERY,
         state_class=SensorStateClass.MEASUREMENT,
@@ -54,27 +52,25 @@ SENSOR_TYPES: dict[str, SensorEntityDescription] = {
     ),
     "lightLevel": SensorEntityDescription(
         key="lightLevel",
-        name="Light level",
+        translation_key="light_level",
         native_unit_of_measurement="Level",
         state_class=SensorStateClass.MEASUREMENT,
     ),
     "humidity": SensorEntityDescription(
         key="humidity",
-        name="Humidity",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.HUMIDITY,
     ),
     "temperature": SensorEntityDescription(
         key="temperature",
-        name="Temperature",
+        name=None,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.TEMPERATURE,
     ),
     "power": SensorEntityDescription(
         key="power",
-        name="Power",
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.POWER,
@@ -83,10 +79,12 @@ SENSOR_TYPES: dict[str, SensorEntityDescription] = {
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: SwitchbotConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Switchbot sensor based on a config entry."""
-    coordinator: SwitchbotDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     entities = [
         SwitchBotSensor(coordinator, sensor)
         for sensor in coordinator.device.parsed_data

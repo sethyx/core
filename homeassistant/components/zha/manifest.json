@@ -1,8 +1,8 @@
 {
   "domain": "zha",
   "name": "Zigbee Home Automation",
-  "after_dependencies": ["onboarding", "usb", "zeroconf"],
-  "codeowners": ["@dmulcahey", "@adminiuga", "@puddly"],
+  "after_dependencies": ["onboarding", "usb"],
+  "codeowners": ["@dmulcahey", "@adminiuga", "@puddly", "@TheJulianJES"],
   "config_flow": true,
   "dependencies": ["file_upload"],
   "documentation": "https://www.home-assistant.io/integrations/zha",
@@ -17,25 +17,23 @@
     "zigpy_deconz",
     "zigpy_xbee",
     "zigpy_zigate",
-    "zigpy_znp"
+    "zigpy_znp",
+    "zha",
+    "universal_silabs_flasher"
   ],
-  "requirements": [
-    "bellows==0.34.7",
-    "pyserial==3.5",
-    "pyserial-asyncio==0.6",
-    "zha-quirks==0.0.92",
-    "zigpy-deconz==0.19.2",
-    "zigpy==0.53.0",
-    "zigpy-xbee==0.16.2",
-    "zigpy-zigate==0.10.3",
-    "zigpy-znp==0.9.2"
-  ],
+  "requirements": ["universal-silabs-flasher==0.0.22", "zha==0.0.34"],
   "usb": [
     {
       "vid": "10C4",
       "pid": "EA60",
       "description": "*2652*",
       "known_devices": ["slae.sh cc2652rb stick"]
+    },
+    {
+      "vid": "10C4",
+      "pid": "EA60",
+      "description": "*slzb-07*",
+      "known_devices": ["smlight slzb-07"]
     },
     {
       "vid": "1A86",
@@ -72,6 +70,12 @@
       "pid": "0030",
       "description": "*conbee*",
       "known_devices": ["Conbee II"]
+    },
+    {
+      "vid": "0403",
+      "pid": "6015",
+      "description": "*conbee*",
+      "known_devices": ["Conbee III"]
     },
     {
       "vid": "10C4",
@@ -112,8 +116,20 @@
       "name": "*zigstar*"
     },
     {
+      "type": "_uzg-01._tcp.local.",
+      "name": "uzg-01*"
+    },
+    {
       "type": "_slzb-06._tcp.local.",
       "name": "slzb-06*"
+    },
+    {
+      "type": "_xzg._tcp.local.",
+      "name": "xzg*"
+    },
+    {
+      "type": "_czc._tcp.local.",
+      "name": "czc*"
     }
   ]
 }

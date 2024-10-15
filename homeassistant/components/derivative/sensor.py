@@ -1,4 +1,5 @@
 """Numeric derivative of data coming from a source sensor over time."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -8,7 +9,13 @@ from typing import TYPE_CHECKING
 
 import voluptuous as vol
 
-from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity
+from homeassistant.components.sensor import (
+    ATTR_STATE_CLASS,
+    PLATFORM_SCHEMA as SENSOR_PLATFORM_SCHEMA,
+    RestoreSensor,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
@@ -18,11 +25,12 @@ from homeassistant.const import (
     STATE_UNKNOWN,
     UnitOfTime,
 )
-from homeassistant.core import Event, HomeAssistant, State, callback
+from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers.device import async_device_info_to_link_from_entity
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
-from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from .const import (
@@ -57,12 +65,10 @@ UNIT_TIME = {
     UnitOfTime.DAYS: 24 * 60 * 60,
 }
 
-ICON = "mdi:chart-line"
-
 DEFAULT_ROUND = 3
 DEFAULT_TIME_WINDOW = 0
 
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
+PLATFORM_SCHEMA = SENSOR_PLATFORM_SCHEMA.extend(
     {
         vol.Optional(CONF_NAME): cv.string,
         vol.Required(CONF_SOURCE): cv.entity_id,
@@ -87,8 +93,13 @@ async def async_setup_entry(
         registry, config_entry.options[CONF_SOURCE]
     )
 
-    unit_prefix = config_entry.options[CONF_UNIT_PREFIX]
-    if unit_prefix == "none":
+    device_info = async_device_info_to_link_from_entity(
+        hass,
+        source_entity_id,
+    )
+
+    if (unit_prefix := config_entry.options.get(CONF_UNIT_PREFIX)) == "none":
+        # Before we had support for optional selectors, "none" was used for selecting nothing
         unit_prefix = None
 
     derivative_sensor = DerivativeSensor(
@@ -100,6 +111,7 @@ async def async_setup_entry(
         unit_of_measurement=None,
         unit_prefix=unit_prefix,
         unit_time=config_entry.options[CONF_UNIT_TIME],
+        device_info=device_info,
     )
 
     async_add_entities([derivative_sensor])
@@ -126,10 +138,10 @@ async def async_setup_platform(
     async_add_entities([derivative])
 
 
-class DerivativeSensor(RestoreEntity, SensorEntity):
-    """Representation of an derivative sensor."""
+class DerivativeSensor(RestoreSensor, SensorEntity):
+    """Representation of a derivative sensor."""
 
-    _attr_icon = ICON
+    _attr_translation_key = "derivative"
     _attr_should_poll = False
 
     def __init__(
@@ -143,9 +155,11 @@ class DerivativeSensor(RestoreEntity, SensorEntity):
         unit_prefix: str | None,
         unit_time: UnitOfTime,
         unique_id: str | None,
+        device_info: DeviceInfo | None = None,
     ) -> None:
         """Initialize the derivative sensor."""
         self._attr_unique_id = unique_id
+        self._attr_device_info = device_info
         self._sensor_source_id = source_entity
         self._round_digits = round_digits
         self._state: float | int | Decimal = 0
@@ -170,21 +184,23 @@ class DerivativeSensor(RestoreEntity, SensorEntity):
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added."""
         await super().async_added_to_hass()
-        if (state := await self.async_get_last_state()) is not None:
+        restored_data = await self.async_get_last_sensor_data()
+        if restored_data:
+            self._attr_native_unit_of_measurement = (
+                restored_data.native_unit_of_measurement
+            )
             try:
-                self._state = Decimal(state.state)
+                self._state = Decimal(restored_data.native_value)  # type: ignore[arg-type]
             except SyntaxError as err:
                 _LOGGER.warning("Could not restore last state: %s", err)
 
         @callback
-        def calc_derivative(event: Event) -> None:
+        def calc_derivative(event: Event[EventStateChangedData]) -> None:
             """Handle the sensor state changes."""
-            old_state: State | None
-            new_state: State | None
             if (
-                (old_state := event.data.get("old_state")) is None
+                (old_state := event.data["old_state"]) is None
                 or old_state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE)
-                or (new_state := event.data.get("new_state")) is None
+                or (new_state := event.data["new_state"]) is None
                 or new_state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE)
             ):
                 return
@@ -223,6 +239,16 @@ class DerivativeSensor(RestoreEntity, SensorEntity):
                 )
             except AssertionError as err:
                 _LOGGER.error("Could not calculate derivative: %s", err)
+
+            # For total inreasing sensors, the value is expected to continuously increase.
+            # A negative derivative for a total increasing sensor likely indicates the
+            # sensor has been reset. To prevent inaccurate data, discard this sample.
+            if (
+                new_state.attributes.get(ATTR_STATE_CLASS)
+                == SensorStateClass.TOTAL_INCREASING
+                and new_derivative < 0
+            ):
+                return
 
             # add latest derivative to the window list
             self._state_list.append(

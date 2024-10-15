@@ -1,4 +1,5 @@
 """Support for RainMachine updates."""
+
 from __future__ import annotations
 
 from enum import Enum
@@ -11,14 +12,13 @@ from homeassistant.components.update import (
     UpdateEntity,
     UpdateEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import RainMachineData, RainMachineEntity
-from .const import DATA_MACHINE_FIRMWARE_UPDATE_STATUS, DOMAIN
-from .model import RainMachineEntityDescription
+from . import RainMachineConfigEntry
+from .const import DATA_MACHINE_FIRMWARE_UPDATE_STATUS
+from .entity import RainMachineEntity, RainMachineEntityDescription
 
 
 class UpdateStates(Enum):
@@ -44,17 +44,17 @@ UPDATE_STATE_MAP = {
 
 UPDATE_DESCRIPTION = RainMachineEntityDescription(
     key="update",
-    name="Firmware",
     api_category=DATA_MACHINE_FIRMWARE_UPDATE_STATUS,
 )
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: RainMachineConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up WLED update based on a config entry."""
-    data: RainMachineData = hass.data[DOMAIN][entry.entry_id]
-
+    """Set up Rainmachine update based on a config entry."""
+    data = entry.runtime_data
     async_add_entities([RainMachineUpdateEntity(entry, data, UPDATE_DESCRIPTION)])
 
 
@@ -62,6 +62,7 @@ class RainMachineUpdateEntity(RainMachineEntity, UpdateEntity):
     """Define a RainMachine update entity."""
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
+    _attr_name = None
     _attr_supported_features = (
         UpdateEntityFeature.INSTALL
         | UpdateEntityFeature.PROGRESS

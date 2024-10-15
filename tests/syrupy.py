@@ -1,4 +1,5 @@
 """Home Assistant extension for Syrupy."""
+
 from __future__ import annotations
 
 from contextlib import suppress
@@ -11,13 +12,7 @@ import attr
 import attrs
 from syrupy.extensions.amber import AmberDataSerializer, AmberSnapshotExtension
 from syrupy.location import PyTestLocation
-from syrupy.types import (
-    PropertyFilter,
-    PropertyMatcher,
-    PropertyPath,
-    SerializableData,
-    SerializedData,
-)
+from syrupy.types import PropertyFilter, PropertyMatcher, PropertyPath, SerializableData
 import voluptuous as vol
 import voluptuous_serialize
 
@@ -85,10 +80,11 @@ class HomeAssistantSnapshotSerializer(AmberDataSerializer):
         *,
         depth: int = 0,
         exclude: PropertyFilter | None = None,
+        include: PropertyFilter | None = None,
         matcher: PropertyMatcher | None = None,
         path: PropertyPath = (),
         visited: set[Any] | None = None,
-    ) -> SerializedData:
+    ) -> str:
         """Pre-process data before serializing.
 
         This allows us to handle specific cases for Home Assistant data structures.
@@ -109,22 +105,23 @@ class HomeAssistantSnapshotSerializer(AmberDataSerializer):
             serializable_data = voluptuous_serialize.convert(data)
         elif isinstance(data, ConfigEntry):
             serializable_data = cls._serializable_config_entry(data)
-        elif dataclasses.is_dataclass(data):
+        elif dataclasses.is_dataclass(type(data)):
             serializable_data = dataclasses.asdict(data)
-        elif isinstance(data, IntFlag) and data == 0:
+        elif isinstance(data, IntFlag):
             # The repr of an enum.IntFlag has changed between Python 3.10 and 3.11
-            # This only concerns the 0 case, which we normalize here
-            serializable_data = 0
+            # so we normalize it here.
+            serializable_data = _IntFlagWrapper(data)
         else:
             serializable_data = data
             with suppress(TypeError):
-                if attr.has(data):
+                if attr.has(type(data)):
                     serializable_data = attrs.asdict(data)
 
         return super()._serialize(
             serializable_data,
             depth=depth,
             exclude=exclude,
+            include=include,
             matcher=matcher,
             path=path,
             visited=visited,
@@ -133,14 +130,16 @@ class HomeAssistantSnapshotSerializer(AmberDataSerializer):
     @classmethod
     def _serializable_area_registry_entry(cls, data: ar.AreaEntry) -> SerializableData:
         """Prepare a Home Assistant area registry entry for serialization."""
-        serialized = AreaRegistryEntrySnapshot(attrs.asdict(data) | {"id": ANY})
+        serialized = AreaRegistryEntrySnapshot(dataclasses.asdict(data) | {"id": ANY})
         serialized.pop("_json_repr")
+        serialized.pop("_cache")
         return serialized
 
     @classmethod
     def _serializable_config_entry(cls, data: ConfigEntry) -> SerializableData:
         """Prepare a Home Assistant config entry for serialization."""
-        return ConfigEntrySnapshot(data.as_dict() | {"entry_id": ANY})
+        entry = ConfigEntrySnapshot(data.as_dict() | {"entry_id": ANY})
+        return cls._remove_created_and_modified_at(entry)
 
     @classmethod
     def _serializable_device_registry_entry(
@@ -156,8 +155,19 @@ class HomeAssistantSnapshotSerializer(AmberDataSerializer):
         )
         if serialized["via_device_id"] is not None:
             serialized["via_device_id"] = ANY
-        serialized.pop("_json_repr")
-        return serialized
+        if serialized["primary_config_entry"] is not None:
+            serialized["primary_config_entry"] = ANY
+        serialized.pop("_cache")
+        return cls._remove_created_and_modified_at(serialized)
+
+    @classmethod
+    def _remove_created_and_modified_at(
+        cls, data: SerializableData
+    ) -> SerializableData:
+        """Remove created_at and modified_at from the data."""
+        data.pop("created_at", None)
+        data.pop("modified_at", None)
+        return data
 
     @classmethod
     def _serializable_entity_registry_entry(
@@ -170,10 +180,12 @@ class HomeAssistantSnapshotSerializer(AmberDataSerializer):
                 "config_entry_id": ANY,
                 "device_id": ANY,
                 "id": ANY,
+                "options": {k: dict(v) for k, v in data.options.items()},
             }
         )
-        serialized.pop("_json_repr")
-        return serialized
+        serialized.pop("categories")
+        serialized.pop("_cache")
+        return cls._remove_created_and_modified_at(serialized)
 
     @classmethod
     def _serializable_flow_result(cls, data: FlowResult) -> SerializableData:
@@ -185,7 +197,7 @@ class HomeAssistantSnapshotSerializer(AmberDataSerializer):
         cls, data: ir.IssueEntry
     ) -> SerializableData:
         """Prepare a Home Assistant issue registry entry for serialization."""
-        return IssueRegistryItemSnapshot(data.to_json() | {"created": ANY})
+        return IssueRegistryItemSnapshot(dataclasses.asdict(data) | {"created": ANY})
 
     @classmethod
     def _serializable_state(cls, data: State) -> SerializableData:
@@ -195,9 +207,21 @@ class HomeAssistantSnapshotSerializer(AmberDataSerializer):
             | {
                 "context": ANY,
                 "last_changed": ANY,
+                "last_reported": ANY,
                 "last_updated": ANY,
             }
         )
+
+
+class _IntFlagWrapper:
+    def __init__(self, flag: IntFlag) -> None:
+        self._flag = flag
+
+    def __repr__(self) -> str:
+        # 3.10: <ClimateEntityFeature.SWING_MODE|PRESET_MODE|FAN_MODE|TARGET_TEMPERATURE: 57>
+        # 3.11: <ClimateEntityFeature.TARGET_TEMPERATURE|FAN_MODE|PRESET_MODE|SWING_MODE: 57>
+        # Syrupy: <ClimateEntityFeature: 57>
+        return f"<{self._flag.__class__.__name__}: {self._flag.value}>"
 
 
 class HomeAssistantSnapshotExtension(AmberSnapshotExtension):

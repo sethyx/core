@@ -1,25 +1,19 @@
 """Tests for the SleepIQ config flow."""
-from collections.abc import Generator
+
 from unittest.mock import AsyncMock, patch
 
 from asyncsleepiq import SleepIQLoginException, SleepIQTimeoutException
 import pytest
 
-from homeassistant import config_entries, data_entry_flow, setup
+from homeassistant import config_entries, setup
 from homeassistant.components.sleepiq.const import DOMAIN
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 
 from .conftest import SLEEPIQ_CONFIG, setup_platform
 
-
-@pytest.fixture(autouse=True, name="mock_setup_entry")
-def override_async_setup_entry() -> Generator[AsyncMock, None, None]:
-    """Override async_setup_entry."""
-    with patch(
-        "homeassistant.components.sleepiq.async_setup_entry", return_value=True
-    ) as mock_setup_entry:
-        yield mock_setup_entry
+pytestmark = pytest.mark.usefixtures("mock_setup_entry")
 
 
 async def test_import(hass: HomeAssistant) -> None:
@@ -56,7 +50,7 @@ async def test_show_set_form(hass: HomeAssistant) -> None:
             DOMAIN, context={"source": config_entries.SOURCE_USER}, data=None
         )
 
-        assert result["type"] == data_entry_flow.FlowResultType.FORM
+        assert result["type"] is FlowResultType.FORM
         assert result["step_id"] == "user"
 
 
@@ -77,7 +71,7 @@ async def test_login_failure(hass: HomeAssistant, side_effect, error) -> None:
             DOMAIN, context={"source": config_entries.SOURCE_USER}, data=SLEEPIQ_CONFIG
         )
 
-        assert result["type"] == data_entry_flow.FlowResultType.FORM
+        assert result["type"] is FlowResultType.FORM
         assert result["step_id"] == "user"
         assert result["errors"] == {"base": error}
 
@@ -87,7 +81,7 @@ async def test_success(hass: HomeAssistant, mock_setup_entry: AsyncMock) -> None
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
-    assert result["type"] == "form"
+    assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {}
 
     with patch("asyncsleepiq.AsyncSleepIQ.login", return_value=True):
@@ -96,7 +90,7 @@ async def test_success(hass: HomeAssistant, mock_setup_entry: AsyncMock) -> None
         )
         await hass.async_block_till_done()
 
-    assert result2["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result2["type"] is FlowResultType.CREATE_ENTRY
     assert result2["data"][CONF_USERNAME] == SLEEPIQ_CONFIG[CONF_USERNAME]
     assert result2["data"][CONF_PASSWORD] == SLEEPIQ_CONFIG[CONF_PASSWORD]
     assert len(mock_setup_entry.mock_calls) == 1
@@ -107,19 +101,7 @@ async def test_reauth_password(hass: HomeAssistant) -> None:
 
     # set up initially
     entry = await setup_platform(hass)
-    with patch(
-        "homeassistant.components.sleepiq.config_flow.AsyncSleepIQ.login",
-        side_effect=SleepIQLoginException,
-    ):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN,
-            context={
-                "source": config_entries.SOURCE_REAUTH,
-                "entry_id": entry.entry_id,
-                "unique_id": entry.unique_id,
-            },
-            data=entry.data,
-        )
+    result = await entry.start_reauth_flow(hass)
 
     with patch(
         "homeassistant.components.sleepiq.config_flow.AsyncSleepIQ.login",
@@ -131,5 +113,5 @@ async def test_reauth_password(hass: HomeAssistant) -> None:
         )
         await hass.async_block_till_done()
 
-    assert result2["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result2["type"] is FlowResultType.ABORT
     assert result2["reason"] == "reauth_successful"

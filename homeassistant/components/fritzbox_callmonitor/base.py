@@ -1,4 +1,5 @@
 """Base class for fritzbox_callmonitor entities."""
+
 from __future__ import annotations
 
 from contextlib import suppress
@@ -19,7 +20,7 @@ MIN_TIME_PHONEBOOK_UPDATE = timedelta(hours=6)
 
 
 class FritzBoxPhonebook:
-    """This connects to a FritzBox router and downloads its phone book."""
+    """Connects to a FritzBox router and downloads its phone book."""
 
     fph: FritzPhonebook
     phonebook_dict: dict[str, list[str]]
@@ -61,7 +62,7 @@ class FritzBoxPhonebook:
             for name, nrs in self.phonebook_dict.items()
             for nr in nrs
         }
-        _LOGGER.info("Fritz!Box phone book successfully updated")
+        _LOGGER.debug("Fritz!Box phone book successfully updated")
 
     def get_phonebook_ids(self) -> list[int]:
         """Return list of phonebook ids."""

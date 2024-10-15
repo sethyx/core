@@ -1,8 +1,10 @@
 """Support for Overkiz (virtual) buttons."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pyoverkiz.enums import OverkizCommand
 from pyoverkiz.types import StateType as OverkizStateType
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
@@ -16,7 +18,7 @@ from .const import DOMAIN, IGNORED_OVERKIZ_DEVICES
 from .entity import OverkizDescriptiveEntity
 
 
-@dataclass
+@dataclass(frozen=True)
 class OverkizButtonDescription(ButtonEntityDescription):
     """Class to describe an Overkiz button."""
 
@@ -65,6 +67,11 @@ BUTTON_DESCRIPTIONS: list[OverkizButtonDescription] = [
         name="My position",
         icon="mdi:star",
     ),
+    OverkizButtonDescription(
+        key=OverkizCommand.CYCLE,
+        name="Toggle",
+        icon="mdi:sync",
+    ),
 ]
 
 SUPPORTED_COMMANDS = {
@@ -88,15 +95,15 @@ async def async_setup_entry(
         ):
             continue
 
-        for command in device.definition.commands:
-            if description := SUPPORTED_COMMANDS.get(command.command_name):
-                entities.append(
-                    OverkizButton(
-                        device.device_url,
-                        data.coordinator,
-                        description,
-                    )
-                )
+        entities.extend(
+            OverkizButton(
+                device.device_url,
+                data.coordinator,
+                description,
+            )
+            for command in device.definition.commands
+            if (description := SUPPORTED_COMMANDS.get(command.command_name))
+        )
 
     async_add_entities(entities)
 

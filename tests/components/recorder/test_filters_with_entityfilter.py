@@ -1,25 +1,29 @@
 """The tests for the recorder filter matching the EntityFilter component."""
+
 import json
 
 from sqlalchemy import select
 from sqlalchemy.engine.row import Row
 
 from homeassistant.components.recorder import Recorder, get_instance
-from homeassistant.components.recorder.db_schema import EventData, Events, States
+from homeassistant.components.recorder.db_schema import EventData, Events, StatesMeta
 from homeassistant.components.recorder.filters import (
     Filters,
     extract_include_exclude_filter_conf,
     sqlalchemy_filter_from_include_exclude_conf,
 )
 from homeassistant.components.recorder.util import session_scope
-from homeassistant.const import ATTR_ENTITY_ID, STATE_ON
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entityfilter import (
+from homeassistant.const import (
+    ATTR_ENTITY_ID,
     CONF_DOMAINS,
     CONF_ENTITIES,
-    CONF_ENTITY_GLOBS,
     CONF_EXCLUDE,
     CONF_INCLUDE,
+    STATE_ON,
+)
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entityfilter import (
+    CONF_ENTITY_GLOBS,
     convert_include_exclude_filter,
 )
 
@@ -39,8 +43,8 @@ async def _async_get_states_and_events_with_filter(
     def _get_states_with_session():
         with session_scope(hass=hass) as session:
             return session.execute(
-                select(States.entity_id).filter(
-                    sqlalchemy_filter.states_entity_filter()
+                select(StatesMeta.entity_id).filter(
+                    sqlalchemy_filter.states_metadata_entity_filter()
                 )
             ).all()
 
@@ -535,7 +539,7 @@ async def test_same_entity_included_excluded_include_domain_wins(
 async def test_specificly_included_entity_always_wins(
     recorder_mock: Recorder, hass: HomeAssistant
 ) -> None:
-    """Test specificlly included entity always wins."""
+    """Test specifically included entity always wins."""
     filter_accept = {
         "media_player.test2",
         "media_player.test3",
@@ -585,7 +589,7 @@ async def test_specificly_included_entity_always_wins(
 async def test_specificly_included_entity_always_wins_over_glob(
     recorder_mock: Recorder, hass: HomeAssistant
 ) -> None:
-    """Test specificlly included entity always wins over a glob."""
+    """Test specifically included entity always wins over a glob."""
     filter_accept = {
         "sensor.apc900va_status",
         "sensor.apc900va_battery_charge",

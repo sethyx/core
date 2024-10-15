@@ -1,4 +1,5 @@
 """Support for Netgear routers."""
+
 from __future__ import annotations
 
 from datetime import timedelta
@@ -6,7 +7,7 @@ import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_PORT, CONF_SSL
+from homeassistant.const import CONF_PORT, CONF_SSL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -47,7 +48,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if port != router.port or ssl != router.ssl:
         data = {**entry.data, CONF_PORT: router.port, CONF_SSL: router.ssl}
         hass.config_entries.async_update_entry(entry, data=data)
-        _LOGGER.info(
+        _LOGGER.warning(
             (
                 "Netgear port-SSL combination updated from (%i, %r) to (%i, %r), "
                 "this should only occur after a firmware update"
@@ -61,19 +62,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     entry.async_on_unload(entry.add_update_listener(update_listener))
-
-    assert entry.unique_id
-    device_registry = dr.async_get(hass)
-    device_registry.async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, entry.unique_id)},
-        manufacturer="Netgear",
-        name=router.device_name,
-        model=router.model,
-        sw_version=router.firmware_version,
-        hw_version=router.hardware_version,
-        configuration_url=f"http://{entry.data[CONF_HOST]}/",
-    )
 
     async def async_update_devices() -> bool:
         """Fetch data from the router."""
@@ -208,7 +196,7 @@ async def update_listener(hass: HomeAssistant, config_entry: ConfigEntry) -> Non
 async def async_remove_config_entry_device(
     hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
 ) -> bool:
-    """Remove a config entry from a device."""
+    """Remove a device from a config entry."""
     router = hass.data[DOMAIN][config_entry.entry_id][KEY_ROUTER]
 
     device_mac = None

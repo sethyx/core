@@ -1,4 +1,5 @@
 """Support for Elgato sensors."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -10,7 +11,6 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     EntityCategory,
@@ -21,31 +21,22 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from . import ElgatorConfigEntry
 from .coordinator import ElgatoData, ElgatoDataUpdateCoordinator
 from .entity import ElgatoEntity
 
 
-@dataclass
-class ElgatoEntityDescriptionMixin:
-    """Mixin values for Elgato entities."""
-
-    value_fn: Callable[[ElgatoData], float | int | None]
-
-
-@dataclass
-class ElgatoSensorEntityDescription(
-    SensorEntityDescription, ElgatoEntityDescriptionMixin
-):
+@dataclass(frozen=True, kw_only=True)
+class ElgatoSensorEntityDescription(SensorEntityDescription):
     """Class describing Elgato sensor entities."""
 
     has_fn: Callable[[ElgatoData], bool] = lambda _: True
+    value_fn: Callable[[ElgatoData], float | int | None]
 
 
 SENSORS = [
     ElgatoSensorEntityDescription(
         key="battery",
-        name="Battery",
         device_class=SensorDeviceClass.BATTERY,
         entity_category=EntityCategory.DIAGNOSTIC,
         native_unit_of_measurement=PERCENTAGE,
@@ -56,7 +47,7 @@ SENSORS = [
     ),
     ElgatoSensorEntityDescription(
         key="voltage",
-        name="Battery voltage",
+        translation_key="voltage",
         entity_registry_enabled_default=False,
         device_class=SensorDeviceClass.VOLTAGE,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -69,7 +60,7 @@ SENSORS = [
     ),
     ElgatoSensorEntityDescription(
         key="input_charge_current",
-        name="Charging current",
+        translation_key="input_charge_current",
         entity_registry_enabled_default=False,
         device_class=SensorDeviceClass.CURRENT,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -82,7 +73,7 @@ SENSORS = [
     ),
     ElgatoSensorEntityDescription(
         key="charge_power",
-        name="Charging power",
+        translation_key="charge_power",
         entity_registry_enabled_default=False,
         device_class=SensorDeviceClass.POWER,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -94,7 +85,7 @@ SENSORS = [
     ),
     ElgatoSensorEntityDescription(
         key="input_charge_voltage",
-        name="Charging voltage",
+        translation_key="input_charge_voltage",
         entity_registry_enabled_default=False,
         device_class=SensorDeviceClass.VOLTAGE,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -110,11 +101,11 @@ SENSORS = [
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: ElgatorConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Elgato sensor based on a config entry."""
-    coordinator: ElgatoDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
 
     async_add_entities(
         ElgatoSensorEntity(

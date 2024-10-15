@@ -1,7 +1,9 @@
 """Tests for Intent component."""
+
 import pytest
 
 from homeassistant.components.cover import SERVICE_OPEN_COVER
+from homeassistant.components.lock import SERVICE_LOCK
 from homeassistant.const import (
     ATTR_DEVICE_CLASS,
     ATTR_FRIENDLY_NAME,
@@ -10,7 +12,7 @@ from homeassistant.const import (
     SERVICE_TURN_ON,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import area_registry, entity_registry, intent
+from homeassistant.helpers import area_registry as ar, entity_registry as er, intent
 from homeassistant.setup import async_setup_component
 
 from tests.common import MockUser, async_mock_service
@@ -27,15 +29,16 @@ async def test_http_handle_intent(
 
         intent_type = "OrderBeer"
 
-        async def async_handle(self, intent):
+        async def async_handle(self, intent_obj):
             """Handle the intent."""
-            assert intent.context.user_id == hass_admin_user.id
-            response = intent.create_response()
+            assert intent_obj.context.user_id == hass_admin_user.id
+            response = intent_obj.create_response()
             response.async_set_speech(
-                "I've ordered a {}!".format(intent.slots["type"]["value"])
+                f"I've ordered a {intent_obj.slots['type']['value']}!"
             )
             response.async_set_card(
-                "Beer ordered", "You chose a {}.".format(intent.slots["type"]["value"])
+                "Beer ordered",
+                f"You chose a {intent_obj.slots['type']['value']}.",
             )
             return response
 
@@ -88,7 +91,7 @@ async def test_cover_intents_loading(hass: HomeAssistant) -> None:
     )
     await hass.async_block_till_done()
 
-    assert response.speech["plain"]["speech"] == "Opened garage door"
+    assert response.speech["plain"]["speech"] == "Opening garage door"
     assert len(calls) == 1
     call = calls[0]
     assert call.domain == "cover"
@@ -116,6 +119,44 @@ async def test_turn_on_intent(hass: HomeAssistant) -> None:
     assert call.domain == "light"
     assert call.service == "turn_on"
     assert call.data == {"entity_id": ["light.test_light"]}
+
+
+async def test_translated_turn_on_intent(
+    hass: HomeAssistant, entity_registry: er.EntityRegistry
+) -> None:
+    """Test HassTurnOn intent on domains which don't have the intent."""
+    result = await async_setup_component(hass, "homeassistant", {})
+    result = await async_setup_component(hass, "intent", {})
+    await hass.async_block_till_done()
+    assert result
+
+    cover = entity_registry.async_get_or_create("cover", "test", "cover_uid")
+    lock = entity_registry.async_get_or_create("lock", "test", "lock_uid")
+
+    hass.states.async_set(cover.entity_id, "closed")
+    hass.states.async_set(lock.entity_id, "unlocked")
+    cover_service_calls = async_mock_service(hass, "cover", SERVICE_OPEN_COVER)
+    lock_service_calls = async_mock_service(hass, "lock", SERVICE_LOCK)
+
+    await intent.async_handle(
+        hass, "test", "HassTurnOn", {"name": {"value": cover.entity_id}}
+    )
+    await intent.async_handle(
+        hass, "test", "HassTurnOn", {"name": {"value": lock.entity_id}}
+    )
+    await hass.async_block_till_done()
+
+    assert len(cover_service_calls) == 1
+    call = cover_service_calls[0]
+    assert call.domain == "cover"
+    assert call.service == "open_cover"
+    assert call.data == {"entity_id": cover.entity_id}
+
+    assert len(lock_service_calls) == 1
+    call = lock_service_calls[0]
+    assert call.domain == "lock"
+    assert call.service == "lock"
+    assert call.data == {"entity_id": lock.entity_id}
 
 
 async def test_turn_off_intent(hass: HomeAssistant) -> None:
@@ -186,7 +227,40 @@ async def test_turn_on_multiple_intent(hass: HomeAssistant) -> None:
     assert call.data == {"entity_id": ["light.test_lights_2"]}
 
 
-async def test_get_state_intent(hass: HomeAssistant) -> None:
+async def test_turn_on_all(hass: HomeAssistant) -> None:
+    """Test HassTurnOn intent with "all" name."""
+    result = await async_setup_component(hass, "homeassistant", {})
+    result = await async_setup_component(hass, "intent", {})
+    assert result
+
+    hass.states.async_set("light.test_light", "off")
+    hass.states.async_set("light.test_light_2", "off")
+    calls = async_mock_service(hass, "light", SERVICE_TURN_ON)
+
+    await intent.async_handle(
+        hass,
+        "test",
+        "HassTurnOn",
+        {"name": {"value": "all"}, "domain": {"value": "light"}},
+    )
+    await hass.async_block_till_done()
+
+    # All lights should be on now
+    assert len(calls) == 2
+    entity_ids = set()
+    for call in calls:
+        assert call.domain == "light"
+        assert call.service == "turn_on"
+        entity_ids.update(call.data.get("entity_id", []))
+
+    assert entity_ids == {"light.test_light", "light.test_light_2"}
+
+
+async def test_get_state_intent(
+    hass: HomeAssistant,
+    area_registry: ar.AreaRegistry,
+    entity_registry: er.EntityRegistry,
+) -> None:
     """Test HassGetState intent.
 
     This tests name, area, domain, device class, and state constraints.
@@ -194,33 +268,31 @@ async def test_get_state_intent(hass: HomeAssistant) -> None:
     assert await async_setup_component(hass, "homeassistant", {})
     assert await async_setup_component(hass, "intent", {})
 
-    areas = area_registry.async_get(hass)
-    bedroom = areas.async_get_or_create("bedroom")
-    kitchen = areas.async_get_or_create("kitchen")
-    office = areas.async_get_or_create("office")
+    bedroom = area_registry.async_get_or_create("bedroom")
+    kitchen = area_registry.async_get_or_create("kitchen")
+    office = area_registry.async_get_or_create("office")
 
     # 1 light in bedroom (off)
     # 1 light in kitchen (on)
     # 1 sensor in kitchen (50)
     # 2 binary sensors in the office (problem, moisture, on)
-    entities = entity_registry.async_get(hass)
-    bedroom_light = entities.async_get_or_create("light", "demo", "1")
-    entities.async_update_entity(bedroom_light.entity_id, area_id=bedroom.id)
+    bedroom_light = entity_registry.async_get_or_create("light", "demo", "1")
+    entity_registry.async_update_entity(bedroom_light.entity_id, area_id=bedroom.id)
 
-    kitchen_sensor = entities.async_get_or_create("sensor", "demo", "2")
-    entities.async_update_entity(kitchen_sensor.entity_id, area_id=kitchen.id)
+    kitchen_sensor = entity_registry.async_get_or_create("sensor", "demo", "2")
+    entity_registry.async_update_entity(kitchen_sensor.entity_id, area_id=kitchen.id)
 
-    kitchen_light = entities.async_get_or_create("light", "demo", "3")
-    entities.async_update_entity(kitchen_light.entity_id, area_id=kitchen.id)
+    kitchen_light = entity_registry.async_get_or_create("light", "demo", "3")
+    entity_registry.async_update_entity(kitchen_light.entity_id, area_id=kitchen.id)
 
-    kitchen_sensor = entities.async_get_or_create("sensor", "demo", "4")
-    entities.async_update_entity(kitchen_sensor.entity_id, area_id=kitchen.id)
+    kitchen_sensor = entity_registry.async_get_or_create("sensor", "demo", "4")
+    entity_registry.async_update_entity(kitchen_sensor.entity_id, area_id=kitchen.id)
 
-    problem_sensor = entities.async_get_or_create("binary_sensor", "demo", "5")
-    entities.async_update_entity(problem_sensor.entity_id, area_id=office.id)
+    problem_sensor = entity_registry.async_get_or_create("binary_sensor", "demo", "5")
+    entity_registry.async_update_entity(problem_sensor.entity_id, area_id=office.id)
 
-    moisture_sensor = entities.async_get_or_create("binary_sensor", "demo", "6")
-    entities.async_update_entity(moisture_sensor.entity_id, area_id=office.id)
+    moisture_sensor = entity_registry.async_get_or_create("binary_sensor", "demo", "6")
+    entity_registry.async_update_entity(moisture_sensor.entity_id, area_id=office.id)
 
     hass.states.async_set(
         bedroom_light.entity_id, "off", attributes={ATTR_FRIENDLY_NAME: "bedroom light"}
@@ -356,7 +428,7 @@ async def test_get_state_intent(hass: HomeAssistant) -> None:
     assert not result.matched_states and not result.unmatched_states
 
     # Test unknown area failure
-    with pytest.raises(intent.IntentHandleError):
+    with pytest.raises(intent.MatchFailedError):
         await intent.async_handle(
             hass,
             "test",
@@ -365,4 +437,21 @@ async def test_get_state_intent(hass: HomeAssistant) -> None:
                 "area": {"value": "does-not-exist"},
                 "domain": {"value": "light"},
             },
+        )
+
+
+async def test_set_position_intent_unsupported_domain(hass: HomeAssistant) -> None:
+    """Test that HassSetPosition intent fails with unsupported domain."""
+    assert await async_setup_component(hass, "homeassistant", {})
+    assert await async_setup_component(hass, "intent", {})
+
+    # Can't set position of lights
+    hass.states.async_set("light.test_light", "off")
+
+    with pytest.raises(intent.IntentHandleError):
+        await intent.async_handle(
+            hass,
+            "test",
+            "HassSetPosition",
+            {"name": {"value": "test light"}, "position": {"value": 100}},
         )

@@ -1,10 +1,13 @@
 """Test the Hardkernel hardware platform."""
+
 from unittest.mock import patch
 
 import pytest
 
 from homeassistant.components.hardkernel.const import DOMAIN
+from homeassistant.components.hassio import DOMAIN as HASSIO_DOMAIN
 from homeassistant.core import HomeAssistant
+from homeassistant.setup import async_setup_component
 
 from tests.common import MockConfigEntry, MockModule, mock_integration
 from tests.typing import WebSocketGenerator
@@ -15,6 +18,7 @@ async def test_hardware_info(
 ) -> None:
     """Test we can get the board info."""
     mock_integration(hass, MockModule("hassio"))
+    await async_setup_component(hass, HASSIO_DOMAIN, {})
 
     # Setup the config entry
     config_entry = MockConfigEntry(
@@ -53,7 +57,7 @@ async def test_hardware_info(
                 },
                 "config_entries": [config_entry.entry_id],
                 "dongle": None,
-                "name": "Home Assistant Blue / Hardkernel Odroid-N2",
+                "name": "Home Assistant Blue / Hardkernel ODROID-N2/N2+",
                 "url": None,
             }
         ]
@@ -66,6 +70,7 @@ async def test_hardware_info_fail(
 ) -> None:
     """Test async_info raises if os_info is not as expected."""
     mock_integration(hass, MockModule("hassio"))
+    await async_setup_component(hass, HASSIO_DOMAIN, {})
 
     # Setup the config entry
     config_entry = MockConfigEntry(

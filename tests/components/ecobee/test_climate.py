@@ -1,12 +1,19 @@
 """The test for the Ecobee thermostat module."""
+
 from http import HTTPStatus
 from unittest import mock
 
 import pytest
 
-from homeassistant.components.ecobee import climate as ecobee
-import homeassistant.const as const
-from homeassistant.const import STATE_OFF
+from homeassistant import const
+from homeassistant.components.climate import ClimateEntityFeature
+from homeassistant.components.ecobee.climate import PRESET_AWAY_INDEFINITELY, Thermostat
+from homeassistant.const import ATTR_SUPPORTED_FEATURES, STATE_OFF
+from homeassistant.core import HomeAssistant
+
+from .common import setup_platform
+
+ENTITY_ID = "climate.ecobee"
 
 
 @pytest.fixture
@@ -15,10 +22,12 @@ def ecobee_fixture():
     vals = {
         "name": "Ecobee",
         "modelNumber": "athenaSmart",
+        "identifier": "abc",
         "program": {
             "climates": [
                 {"name": "Climate1", "climateRef": "c1"},
                 {"name": "Climate2", "climateRef": "c2"},
+                {"name": "Away", "climateRef": "away"},
             ],
             "currentClimateRef": "c1",
         },
@@ -44,9 +53,11 @@ def ecobee_fixture():
                 "name": "Event1",
                 "running": True,
                 "type": "hold",
-                "holdClimateRef": "away",
-                "endDate": "2017-01-01 10:00:00",
-                "startDate": "2017-02-02 11:00:00",
+                "holdClimateRef": "c1",
+                "startDate": "2017-02-02",
+                "startTime": "11:00:00",
+                "endDate": "2017-01-01",
+                "endTime": "10:00:00",
             }
         ],
     }
@@ -68,12 +79,28 @@ def data_fixture(ecobee_fixture):
 def thermostat_fixture(data):
     """Set up ecobee thermostat object."""
     thermostat = data.ecobee.get_thermostat(1)
-    return ecobee.Thermostat(data, 1, thermostat)
+    return Thermostat(data, 1, thermostat)
 
 
 async def test_name(thermostat) -> None:
     """Test name property."""
-    assert thermostat.name == "Ecobee"
+    assert thermostat.device_info["name"] == "Ecobee"
+
+
+async def test_aux_heat_not_supported_by_default(hass: HomeAssistant) -> None:
+    """Default setup should not support Aux heat."""
+    await setup_platform(hass, const.Platform.CLIMATE)
+    state = hass.states.get(ENTITY_ID)
+    assert (
+        state.attributes.get(ATTR_SUPPORTED_FEATURES)
+        == ClimateEntityFeature.PRESET_MODE
+        | ClimateEntityFeature.FAN_MODE
+        | ClimateEntityFeature.TARGET_HUMIDITY
+        | ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
+        | ClimateEntityFeature.TARGET_TEMPERATURE
+        | ClimateEntityFeature.TURN_OFF
+        | ClimateEntityFeature.TURN_ON
+    )
 
 
 async def test_current_temperature(ecobee_fixture, thermostat) -> None:
@@ -141,7 +168,7 @@ async def test_hvac_mode(ecobee_fixture, thermostat) -> None:
 
 async def test_hvac_modes(thermostat) -> None:
     """Test operation list property."""
-    assert ["heat_cool", "heat", "cool", "off"] == thermostat.hvac_modes
+    assert thermostat.hvac_modes == ["heat_cool", "heat", "cool", "off"]
 
 
 async def test_hvac_mode2(ecobee_fixture, thermostat) -> None:
@@ -154,58 +181,51 @@ async def test_hvac_mode2(ecobee_fixture, thermostat) -> None:
 async def test_extra_state_attributes(ecobee_fixture, thermostat) -> None:
     """Test device state attributes property."""
     ecobee_fixture["equipmentStatus"] = "heatPump2"
-    assert {
+    assert thermostat.extra_state_attributes == {
         "fan": "off",
         "climate_mode": "Climate1",
         "fan_min_on_time": 10,
         "equipment_running": "heatPump2",
-    } == thermostat.extra_state_attributes
+    }
 
     ecobee_fixture["equipmentStatus"] = "auxHeat2"
-    assert {
+    assert thermostat.extra_state_attributes == {
         "fan": "off",
         "climate_mode": "Climate1",
         "fan_min_on_time": 10,
         "equipment_running": "auxHeat2",
-    } == thermostat.extra_state_attributes
+    }
 
     ecobee_fixture["equipmentStatus"] = "compCool1"
-    assert {
+    assert thermostat.extra_state_attributes == {
         "fan": "off",
         "climate_mode": "Climate1",
         "fan_min_on_time": 10,
         "equipment_running": "compCool1",
-    } == thermostat.extra_state_attributes
+    }
     ecobee_fixture["equipmentStatus"] = ""
-    assert {
+    assert thermostat.extra_state_attributes == {
         "fan": "off",
         "climate_mode": "Climate1",
         "fan_min_on_time": 10,
         "equipment_running": "",
-    } == thermostat.extra_state_attributes
+    }
 
     ecobee_fixture["equipmentStatus"] = "Unknown"
-    assert {
+    assert thermostat.extra_state_attributes == {
         "fan": "off",
         "climate_mode": "Climate1",
         "fan_min_on_time": 10,
         "equipment_running": "Unknown",
-    } == thermostat.extra_state_attributes
+    }
 
     ecobee_fixture["program"]["currentClimateRef"] = "c2"
-    assert {
+    assert thermostat.extra_state_attributes == {
         "fan": "off",
         "climate_mode": "Climate2",
         "fan_min_on_time": 10,
         "equipment_running": "Unknown",
-    } == thermostat.extra_state_attributes
-
-
-async def test_is_aux_heat_on(ecobee_fixture, thermostat) -> None:
-    """Test aux heat property."""
-    assert not thermostat.is_aux_heat
-    ecobee_fixture["equipmentStatus"] = "fan, auxHeat"
-    assert thermostat.is_aux_heat
+    }
 
 
 async def test_set_temperature(ecobee_fixture, thermostat, data) -> None:
@@ -293,13 +313,10 @@ async def test_hold_preference(ecobee_fixture, thermostat) -> None:
     """Test hold preference."""
     ecobee_fixture["settings"]["holdAction"] = "indefinite"
     assert thermostat.hold_preference() == "indefinite"
-    for action in ["useEndTime2hour", "useEndTime4hour"]:
+    for action in ("useEndTime2hour", "useEndTime4hour"):
         ecobee_fixture["settings"]["holdAction"] = action
         assert thermostat.hold_preference() == "holdHours"
-    for action in [
-        "nextPeriod",
-        "askMe",
-    ]:
+    for action in ("nextPeriod", "askMe"):
         ecobee_fixture["settings"]["holdAction"] = action
         assert thermostat.hold_preference() == "nextTransition"
 
@@ -310,11 +327,7 @@ def test_hold_hours(ecobee_fixture, thermostat) -> None:
     assert thermostat.hold_hours() == 2
     ecobee_fixture["settings"]["holdAction"] = "useEndTime4hour"
     assert thermostat.hold_hours() == 4
-    for action in [
-        "nextPeriod",
-        "indefinite",
-        "askMe",
-    ]:
+    for action in ("nextPeriod", "indefinite", "askMe"):
         ecobee_fixture["settings"]["holdAction"] = action
         assert thermostat.hold_hours() is None
 
@@ -334,4 +347,31 @@ async def test_set_fan_mode_auto(thermostat, data) -> None:
     thermostat.set_fan_mode("auto")
     data.ecobee.set_fan_mode.assert_has_calls(
         [mock.call(1, "auto", "nextTransition", holdHours=None)]
+    )
+
+
+async def test_preset_indefinite_away(ecobee_fixture, thermostat) -> None:
+    """Test indefinite away showing correctly, and not as temporary away."""
+    ecobee_fixture["program"]["currentClimateRef"] = "away"
+    ecobee_fixture["events"][0]["holdClimateRef"] = "away"
+    assert thermostat.preset_mode == "away"
+
+    ecobee_fixture["events"][0]["endDate"] = "2999-01-01"
+    assert thermostat.preset_mode == PRESET_AWAY_INDEFINITELY
+
+
+async def test_set_preset_mode(ecobee_fixture, thermostat, data) -> None:
+    """Test set preset mode."""
+    # Set a preset provided by ecobee.
+    data.reset_mock()
+    thermostat.set_preset_mode("Climate2")
+    data.ecobee.set_climate_hold.assert_has_calls(
+        [mock.call(1, "c2", thermostat.hold_preference(), thermostat.hold_hours())]
+    )
+
+    # Set the indefinite away preset provided by this integration.
+    data.reset_mock()
+    thermostat.set_preset_mode(PRESET_AWAY_INDEFINITELY)
+    data.ecobee.set_climate_hold.assert_has_calls(
+        [mock.call(1, "away", "indefinite", thermostat.hold_hours())]
     )

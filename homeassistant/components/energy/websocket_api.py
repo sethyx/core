@@ -1,18 +1,19 @@
 """The Energy websocket API."""
+
 from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from datetime import timedelta
 import functools
 from itertools import chain
-from types import ModuleType
 from typing import Any, cast
 
 import voluptuous as vol
 
 from homeassistant.components import recorder, websocket_api
+from homeassistant.components.recorder.statistics import StatisticsRow
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.integration_platform import (
@@ -29,16 +30,16 @@ from .data import (
     EnergyPreferencesUpdate,
     async_get_manager,
 )
-from .types import EnergyPlatform, GetSolarForecastType
+from .types import EnergyPlatform, GetSolarForecastType, SolarForecastType
 from .validate import async_validate
 
-EnergyWebSocketCommandHandler = Callable[
-    [HomeAssistant, websocket_api.ActiveConnection, "dict[str, Any]", "EnergyManager"],
+type EnergyWebSocketCommandHandler = Callable[
+    [HomeAssistant, websocket_api.ActiveConnection, dict[str, Any], EnergyManager],
     None,
 ]
-AsyncEnergyWebSocketCommandHandler = Callable[
-    [HomeAssistant, websocket_api.ActiveConnection, "dict[str, Any]", "EnergyManager"],
-    Awaitable[None],
+type AsyncEnergyWebSocketCommandHandler = Callable[
+    [HomeAssistant, websocket_api.ActiveConnection, dict[str, Any], EnergyManager],
+    Coroutine[Any, Any, None],
 ]
 
 
@@ -60,26 +61,30 @@ async def async_get_energy_platforms(
     """Get energy platforms."""
     platforms: dict[str, GetSolarForecastType] = {}
 
-    async def _process_energy_platform(
-        hass: HomeAssistant, domain: str, platform: ModuleType
+    @callback
+    def _process_energy_platform(
+        hass: HomeAssistant,
+        domain: str,
+        platform: EnergyPlatform,
     ) -> None:
         """Process energy platforms."""
         if not hasattr(platform, "async_get_solar_forecast"):
             return
 
-        platforms[domain] = cast(EnergyPlatform, platform).async_get_solar_forecast
+        platforms[domain] = platform.async_get_solar_forecast
 
-    await async_process_integration_platforms(hass, DOMAIN, _process_energy_platform)
+    await async_process_integration_platforms(
+        hass, DOMAIN, _process_energy_platform, wait_for_platforms=True
+    )
 
     return platforms
 
 
 def _ws_with_manager(
-    func: Any,
-) -> websocket_api.WebSocketCommandHandler:
+    func: AsyncEnergyWebSocketCommandHandler | EnergyWebSocketCommandHandler,
+) -> websocket_api.AsyncWebSocketCommandHandler:
     """Decorate a function to pass in a manager."""
 
-    @websocket_api.async_response
     @functools.wraps(func)
     async def with_manager(
         hass: HomeAssistant,
@@ -101,12 +106,13 @@ def _ws_with_manager(
         vol.Required("type"): "energy/get_prefs",
     }
 )
+@websocket_api.async_response
 @_ws_with_manager
 @callback
 def ws_get_prefs(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
-    msg: dict,
+    msg: dict[str, Any],
     manager: EnergyManager,
 ) -> None:
     """Handle get prefs command."""
@@ -125,11 +131,12 @@ def ws_get_prefs(
         vol.Optional("device_consumption"): [DEVICE_CONSUMPTION_SCHEMA],
     }
 )
+@websocket_api.async_response
 @_ws_with_manager
 async def ws_save_prefs(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
-    msg: dict,
+    msg: dict[str, Any],
     manager: EnergyManager,
 ) -> None:
     """Handle get prefs command."""
@@ -181,6 +188,7 @@ async def ws_validate(
         vol.Required("type"): "energy/solar_forecast",
     }
 )
+@websocket_api.async_response
 @_ws_with_manager
 async def ws_solar_forecast(
     hass: HomeAssistant,
@@ -198,19 +206,18 @@ async def ws_solar_forecast(
     for source in manager.data["energy_sources"]:
         if (
             source["type"] != "solar"
-            or source.get("config_entry_solar_forecast") is None
+            or (solar_forecast := source.get("config_entry_solar_forecast")) is None
         ):
             continue
 
-        # typing is not catching the above guard for config_entry_solar_forecast being none
-        for config_entry in source["config_entry_solar_forecast"]:  # type: ignore[union-attr]
-            config_entries[config_entry] = None
+        for entry in solar_forecast:
+            config_entries[entry] = None
 
     if not config_entries:
         connection.send_result(msg["id"], {})
         return
 
-    forecasts = {}
+    forecasts: dict[str, SolarForecastType] = {}
 
     forecast_platforms = await async_get_energy_platforms(hass)
 
@@ -261,8 +268,8 @@ async def ws_get_fossil_energy_consumption(
         connection.send_error(msg["id"], "invalid_end_time", "Invalid end_time")
         return
 
-    statistic_ids = list(msg["energy_statistic_ids"])
-    statistic_ids.append(msg["co2_statistic_id"])
+    statistic_ids = set(msg["energy_statistic_ids"])
+    statistic_ids.add(msg["co2_statistic_id"])
 
     # Fetch energy + CO2 statistics
     statistics = await recorder.get_instance(hass).async_add_executor_job(
@@ -273,11 +280,11 @@ async def ws_get_fossil_energy_consumption(
         statistic_ids,
         "hour",
         {"energy": UnitOfEnergy.KILO_WATT_HOUR},
-        {"mean", "sum"},
+        {"mean", "change"},
     )
 
-    def _combine_sum_statistics(
-        stats: dict[str, list[dict[str, Any]]], statistic_ids: list[str]
+    def _combine_change_statistics(
+        stats: dict[str, list[StatisticsRow]], statistic_ids: list[str]
     ) -> dict[float, float]:
         """Combine multiple statistics, returns a dict indexed by start time."""
         result: defaultdict[float, float] = defaultdict(float)
@@ -286,20 +293,11 @@ async def ws_get_fossil_energy_consumption(
             if statistics_id not in statistic_ids:
                 continue
             for period in stat:
-                if period["sum"] is None:
+                if period["change"] is None:
                     continue
-                result[period["start"]] += period["sum"]
+                result[period["start"]] += period["change"]
 
         return {key: result[key] for key in sorted(result)}
-
-    def _calculate_deltas(sums: dict[float, float]) -> dict[float, float]:
-        prev: float | None = None
-        result: dict[float, float] = {}
-        for period, sum_ in sums.items():
-            if prev is not None:
-                result[period] = sum_ - prev
-            prev = sum_
-        return result
 
     def _reduce_deltas(
         stat_list: list[dict[str, Any]],
@@ -313,11 +311,10 @@ async def ws_get_fossil_energy_consumption(
         if not stat_list:
             return result
         prev_stat: dict[str, Any] = stat_list[0]
+        fake_stat = {"start": stat_list[-1]["start"] + period.total_seconds()}
 
         # Loop over the hourly deltas + a fake entry to end the period
-        for statistic in chain(
-            stat_list, ({"start": stat_list[-1]["start"] + period.total_seconds()},)
-        ):
+        for statistic in chain(stat_list, (fake_stat,)):
             if not same_period(prev_stat["start"], statistic["start"]):
                 start, _ = period_start_end(prev_stat["start"])
                 # The previous statistic was the last entry of the period
@@ -334,19 +331,21 @@ async def ws_get_fossil_energy_consumption(
 
         return result
 
-    merged_energy_statistics = _combine_sum_statistics(
+    merged_energy_statistics = _combine_change_statistics(
         statistics, msg["energy_statistic_ids"]
     )
-    energy_deltas = _calculate_deltas(merged_energy_statistics)
-    indexed_co2_statistics = {
-        period["start"]: period["mean"]
-        for period in statistics.get(msg["co2_statistic_id"], {})
-    }
+    indexed_co2_statistics = cast(
+        dict[float, float],
+        {
+            period["start"]: period["mean"]
+            for period in statistics.get(msg["co2_statistic_id"], {})
+        },
+    )
 
     # Calculate amount of fossil based energy, assume 100% fossil if missing
     fossil_energy = [
         {"start": start, "delta": delta * indexed_co2_statistics.get(start, 100) / 100}
-        for start, delta in energy_deltas.items()
+        for start, delta in merged_energy_statistics.items()
     ]
 
     if msg["period"] == "hour":
