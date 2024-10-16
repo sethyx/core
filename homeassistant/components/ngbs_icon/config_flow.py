@@ -1,11 +1,12 @@
-"""Config flow."""
+"""Config flow for the NGBS Icon integration."""
+
 import logging
 
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_EMAIL, CONF_ID, CONF_PASSWORD
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.const import CONF_EMAIL, CONF_ID, CONF_PASSWORD, CONF_SCAN_INTERVAL
 from homeassistant.helpers import aiohttp_client
 
 from .const import DOMAIN
@@ -17,44 +18,44 @@ from .icon import (
     UnauthorizedError,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
+DEFAULT_POLLING_INTERVAL = 300
+
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_EMAIL): str,
         vol.Required(CONF_PASSWORD): str,
         vol.Required(CONF_ID): str,
+        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_POLLING_INTERVAL): vol.All(
+            vol.Coerce(int), vol.Range(min=30)
+        ),
     }
 )
 
-_LOGGER = logging.getLogger(__name__)
-
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow."""
-
-    def __init__(self) -> None:
-        """Initialize the config flow."""
-        self.api: IconClient
-        self.user: str | None = None
-        self.password: str | None = None
-        self.xid: str | None = None
+    """Handle a config flow for the NGBS Icon integration."""
 
     VERSION = 1
 
-    async def async_step_user(self, user_input=None) -> FlowResult:
-        """Show the setup form to the user."""
-
-        session = aiohttp_client.async_create_clientsession(self.hass)
-
+    async def async_step_user(self, user_input=None) -> ConfigFlowResult:
+        """Handle the initial step of the configuration flow."""
         errors = {}
 
         if user_input is not None:
-            self.user = user_input[CONF_EMAIL]
-            self.password = user_input[CONF_PASSWORD]
-            self.xid = user_input[CONF_ID]
+            session = aiohttp_client.async_create_clientsession(self.hass)
+            user, password, xid = (
+                user_input[CONF_EMAIL],
+                user_input[CONF_PASSWORD],
+                user_input[CONF_ID],
+            )
+            api = IconClient(session, user, password, xid)
 
             try:
-                self.api = IconClient(session, self.user, self.password, self.xid)
-                await self.api.login()
+                await api.login()
+                return self.async_create_entry(title="NGBS iCON", data=user_input)
+
             except InvalidIDError:
                 errors["base"] = "invalid_id"
             except UnauthorizedError:
@@ -63,11 +64,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
             except LogoutNeededError:
                 errors["base"] = "logout_needed"
-            else:
-                return self.async_create_entry(title="ngbs_icon", data=user_input)
-
-            if errors["base"] in ("invalid_id", "logout_needed"):
-                await self.api.logout()
+                await api.logout()
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
