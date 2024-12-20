@@ -43,7 +43,7 @@ class IconDataUpdateCoordinator(DataUpdateCoordinator[list[dict[str, Any]]]):
     async def _async_update_data(self) -> list[dict[str, Any]]:
         """Fetch data from the API and update devices."""
         try:
-            result = await self.api.poll_api()
+            result = await self.api.async_get_data()
             if result:
                 self.entities = result
                 return self.entities

@@ -108,7 +108,7 @@ class ClimateDevice(CoordinatorEntity[IconDataUpdateCoordinator], ClimateEntity)
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set a new target HVAC mode."""
         if hvac_mode != self._attr_hvac_mode:
-            await self.coordinator.api.set_hc_mode(self._attr_unique_id, hvac_mode)
+            await self.coordinator.api.async_set_hvac_mode(hvac_mode)
             if self._optimistic:
                 # Optimistically update the hvac mode immediately
                 self._attr_hvac_mode = hvac_mode
@@ -120,7 +120,9 @@ class ClimateDevice(CoordinatorEntity[IconDataUpdateCoordinator], ClimateEntity)
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Set a new preset mode."""
         if preset_mode != self._attr_preset_mode:
-            await self.coordinator.api.set_ce_mode(self._attr_unique_id, preset_mode)
+            await self.coordinator.api.async_set_eco_mode(
+                self._attr_unique_id, preset_mode
+            )
             if self._optimistic:
                 # Optimistically update the preset mode immediately
                 self._attr_preset_mode = preset_mode
@@ -136,7 +138,7 @@ class ClimateDevice(CoordinatorEntity[IconDataUpdateCoordinator], ClimateEntity)
             raise ValueError(f"Missing {ATTR_TEMPERATURE} parameter")
 
         if target_temperature != self._attr_target_temperature:
-            await self.coordinator.api.set_temperature(
+            await self.coordinator.api.async_set_temperature(
                 self._attr_unique_id, target_temperature
             )
             if self._optimistic:

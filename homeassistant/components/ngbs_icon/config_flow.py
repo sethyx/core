@@ -49,15 +49,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             await self.async_set_unique_id(user_input[CONF_ID])
             session = aiohttp_client.async_create_clientsession(self.hass)
-            user, password, xid = (
+            user, password, system_id = (
                 user_input[CONF_EMAIL],
                 user_input[CONF_PASSWORD],
                 user_input[CONF_ID],
             )
-            api = IconClient(session, user, password, xid)
+            api = IconClient(session, user, password, system_id)
 
             try:
-                await api.login()
+                await api.async_login()
                 return self.async_create_entry(title="NGBS iCON", data=user_input)
 
             except InvalidIDError:
@@ -68,7 +68,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
             except LogoutNeededError:
                 errors["base"] = "logout_needed"
-                await api.logout()
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
@@ -91,7 +90,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             api = IconClient(session, user, password, xid)
 
             try:
-                await api.login()
+                await api.async_login()
                 return self.async_update_reload_and_abort(
                     self._get_reconfigure_entry(),
                     data_updates=user_input,
@@ -105,7 +104,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
             except LogoutNeededError:
                 errors["base"] = "logout_needed"
-                await api.logout()
 
         return self.async_show_form(
             step_id="reconfigure", data_schema=STEP_USER_DATA_SCHEMA

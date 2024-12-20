@@ -28,7 +28,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     try:
-        await api.login()
+        await api.async_login()
     except CannotConnect as err:
         _LOGGER.error("Failed to login to iCON: %s", err)
         return False

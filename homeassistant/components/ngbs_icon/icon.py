@@ -1,123 +1,178 @@
 """iCon module for the iCON integration."""
 
-import json
 import logging
-import re
+from typing import Any
 
 import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
 
-AUTH_URL = "http://www.enzoldhazam.hu"
-LIST_URL = f"{AUTH_URL}/Ax?action=iconList"
-DEVICE_POLL_URL = f"{AUTH_URL}/Ax?action=iconByID&serial="
-CONTROL_URL = f"{AUTH_URL}/Ax"
-LOGOUT_URL = f"{AUTH_URL}/logout"
+API_URL = "https://stat.ngbsh.hu/api"
+
+# may need to expose these on the ui
+APP_VERSION = "1.1.3.2"
 
 
 class IconClient:
     """Class to handle iCON client connections."""
 
     def __init__(
-        self, session: aiohttp.ClientSession, email: str, password: str, xid: str
+        self, session: aiohttp.ClientSession, email: str, password: str, system_id: str
     ) -> None:
         """Initialize client."""
         self.session = session
         self.email = email
         self.password = password
-        self.xid = xid
-        self.logged_in = False
+        self.token = None
+        self.last_data = dict[str, Any]()
+        self.system_id = system_id
 
-    async def _get_token(self, html_data: str) -> str:
-        """Extract token from HTML."""
-        token_match = re.search(r"token.*?(\d+)", html_data)
-        if not token_match:
-            raise LogoutNeededError("Token not found, logout required.")
-        return token_match.group(1)
+    async def async_login(self):
+        """Perform login to the NGBSH API."""
+        url = f"{API_URL}/auth"
+        data = {"username": self.email, "password": self.password, "version": "1.1.3.2"}
+        try:
+            async with self.session.post(url, json=data, timeout=10) as response:
+                response.raise_for_status()
+                result = await response.json()
+                self.token = result["token"]
+                return True
+        except aiohttp.ClientError as e:
+            _LOGGER.error("Login failed: %s", e)
+            return False
+        except TimeoutError:
+            _LOGGER.error("Login timed out")
+            return False
 
-    async def _perform_login(self, token: str) -> None:
-        """Complete the login process."""
-        form_data = aiohttp.FormData()
-        form_data.add_field("username", self.email)
-        form_data.add_field("password", self.password)
-        form_data.add_field("token", token)
-        async with self.session.post(AUTH_URL, data=form_data) as resp:
-            if resp.status not in [200, 302]:
-                raise UnauthorizedError("Login failed.")
-        await self._fetch_icon_list()
+    async def async_get_data(self) -> list[dict[str, Any]]:
+        """Retrieve data from the NGBSH API and calls _generate_entities."""
+        if self.token is None and not await self.async_login():
+            return [self.last_data]
+        url = f"{API_URL}/icon/iconlist"
+        headers = {"Authorization": f"Bearer {self.token}"}
+        try:
+            async with self.session.get(
+                url, headers=headers, timeout=aiohttp.ClientTimeout(10)
+            ) as response:
+                response.raise_for_status()
+                full_data = await response.json()
+                self.last_data = full_data.get("ICONS", {}).get(self.system_id, {})
+                return _generate_entities(self.last_data)
+        except aiohttp.ClientError as e:
+            _LOGGER.error("Error getting data: %s", e)
+            if response.status in (401, 403):
+                if await self.async_login():
+                    return await self.async_get_data()
+            return [self.last_data]
+        except TimeoutError:
+            _LOGGER.error("Getting data timed out")
+            return [self.last_data]
 
-    async def _fetch_icon_list(self) -> None:
-        """Fetch the list of icons after login."""
-        async with self.session.get(LIST_URL) as resp:
-            _LOGGER.debug("List Response: %d - %s", resp.status, await resp.text())
-            if resp.status != 200:
-                raise CannotConnect(f"Failed to fetch system list: {resp.status}")
-            json_data = json.loads(await resp.text())
-            if not _get_icon_match_from_login(json_data, self.xid):
-                raise InvalidIDError(f"ICON ID {self.xid} not found.")
-            self.logged_in = True
-            _LOGGER.info("Login successful: ICON %s connected", self.xid)
+    async def async_set_temperature(self, thermostat_id, temperature):
+        """Set the temperature for a specific thermostat."""
+        if self.token is None and not await self.async_login():
+            return False
+        url = f"{API_URL}/icon/set"
+        headers = {"Authorization": f"Bearer {self.token}"}
+        data = {
+            "attr": "REQ",
+            "value": temperature,
+            "SNR": self.system_id,
+            "TERM": thermostat_id,
+        }
+        try:
+            async with self.session.post(
+                url, headers=headers, json=data, timeout=10
+            ) as response:
+                response.raise_for_status()
+                _LOGGER.debug(
+                    "Temperature set for %s to %f", thermostat_id, temperature
+                )
+                return True
+        except aiohttp.ClientError as e:
+            _LOGGER.error("Error setting temperature: %s", e)
+            if response.status in (401, 403):
+                if await self.async_login():
+                    return await self.async_set_temperature(thermostat_id, temperature)
+            return False
+        except TimeoutError:
+            _LOGGER.error("Setting temperature timed out")
+            return False
 
-    async def login(self) -> None:
-        """Login to API."""
-        async with self.session.get(AUTH_URL) as resp:
-            _LOGGER.info("Login step 1 - %s", resp.status)
-            token = await self._get_token(await resp.text())
-            _LOGGER.info("Token: %s", token)
-        await self._perform_login(token)
+    async def async_set_hvac_mode(self, mode):
+        """Set the heating/cooling mode for the master thermostat."""
+        if self.token is None and not await self.async_login():
+            return False
 
-    async def logout(self) -> None:
-        """Logout from API endpoint."""
-        async with self.session.get(LOGOUT_URL) as resp:
-            self.logged_in = False
-            await resp.text()
+        if not self.last_data:
+            await self.async_get_data()
+        if self.last_data is None:
+            return False
 
-    async def poll_api(self) -> list:
-        """Poll the API for device data."""
-        _LOGGER.info("Polling NGBS")
-        async with self.session.get(f"{DEVICE_POLL_URL}{self.xid}") as resp:
-            if resp.status != 200:
-                _LOGGER.warning("Poll failed: %s", resp.status)
-                await self.login()
-                return []
-            return _generate_entities(json.loads(await resp.text()))
+        master_id = self.last_data.get("HC_MASTERICON")
+        if not master_id:
+            _LOGGER.error("Master thermostat not found")
+            return False
 
-    async def set_mode(
-        self, xtid: str | None, mode: str | None, attr: str, value: int | None
-    ) -> bool:
-        """Set device mode."""
-        form_data = aiohttp.FormData(
-            {
-                "action": "setThermostat" if attr != "HC" else "setIcon",
-                "attr": attr,
-                "icon": self.xid,
-                "thermostat": xtid if attr != "HC" else None,
-                "value": value,
-            }
-        )
-        async with self.session.post(CONTROL_URL, data=form_data) as resp:
-            if resp.status == 200:
-                json_data = json.loads(await resp.text())
-                return _verify_set_response(json_data)
-        return False
+        value = 0 if mode == "heat" else 1  # 0: heat, 1: cool
 
-    async def set_hc_mode(self, xtid: str | None, mode: str | None) -> bool:
-        """Set heating/cooling mode."""
-        return await self.set_mode(xtid, mode, "HC", 1 if mode == "cool" else 0)
+        url = f"{API_URL}/icon/set"
+        headers = {"Authorization": f"Bearer {self.token}"}
+        data = {"value": value, "SNR": self.system_id, "attr": "HC", "TERM": ""}
+        try:
+            async with self.session.post(
+                url, headers=headers, json=data, timeout=10
+            ) as response:
+                response.raise_for_status()
+                _LOGGER.debug("HVAC mode set to %s", mode)
+                return True
+        except aiohttp.ClientError as e:
+            _LOGGER.error("Error setting HVAC mode: %s", e)
+            if response.status in (401, 403):
+                if await self.async_login():
+                    return await self.async_set_hvac_mode(mode)
+            return False
+        except TimeoutError:
+            _LOGGER.error("Setting HVAC mode timed out")
+            return False
 
-    async def set_ce_mode(self, xtid: str | None, mode: str | None) -> bool:
-        """Set energy-saving (eco) mode."""
-        return await self.set_mode(xtid, mode, "CE", 1 if mode == "eco" else 0)
+    async def async_set_eco_mode(self, thermostat_id, mode):
+        """Set eco/comfort mode for a specific thermostat."""
+        if self.token is None and not await self.async_login():
+            return False
 
-    async def set_temperature(self, xtid: str | None, temp: int | None) -> bool:
-        """Set the thermostat temperature."""
-        return await self.set_mode(xtid, "temp", "REQ", temp)
+        value = 1 if mode == "eco" else 0  # 1: eco, 0: comfort
+
+        url = f"{API_URL}/icon/set"
+        headers = {"Authorization": f"Bearer {self.token}"}
+        data = {
+            "attr": "CE",
+            "value": value,
+            "SNR": self.system_id,
+            "TERM": thermostat_id,
+        }
+        try:
+            async with self.session.post(
+                url, headers=headers, json=data, timeout=10
+            ) as response:
+                response.raise_for_status()
+                _LOGGER.debug("Eco mode set for %s to %s", thermostat_id, mode)
+                return True
+        except aiohttp.ClientError as e:
+            _LOGGER.error("Error setting eco mode: %s", e)
+            if response.status in (401, 403):
+                if await self.async_login():
+                    return await self.async_set_eco_mode(thermostat_id, mode)
+            return False
+        except TimeoutError:
+            _LOGGER.error("Setting eco mode timed out")
+            return False
 
 
 def _generate_entities(data: dict) -> list:
     """Generate device data from API response."""
     entities = []
-    online = data.get("ICON", {}).get("ONLINE", False)
+    online = data.get("ONLINE", False)
 
     if not online:
         entities.append(
@@ -131,14 +186,14 @@ def _generate_entities(data: dict) -> list:
         )
         return entities
 
-    master_name = data["ICON"].get("HC_MASTERICON")
+    master_name = data.get("HC_MASTERICON")
     entities.append(
         {
             "type": "sensor",
             "id": "icon_system_wtemp",
             "parent": "iCon system",
             "name": "Water temperature",
-            "value": data["ICON"].get("WTEMP"),
+            "value": data.get("WTEMP"),
         }
     )
     entities.append(
@@ -147,7 +202,7 @@ def _generate_entities(data: dict) -> list:
             "id": "icon_system_pump",
             "parent": "iCon system",
             "name": "Water pump",
-            "is_on": data["ICON"].get("PUMP") > 0,
+            "is_on": data.get("PUMP", 0) > 0,
         }
     )
     entities.append(
@@ -165,11 +220,11 @@ def _generate_entities(data: dict) -> list:
             "id": "icon_system_valve_state",
             "parent": "iCon system",
             "name": "Valve state",
-            "value": data["ICON"].get("AO"),
+            "value": data.get("AO"),
         }
     )
 
-    for therm in data["ICON"].get("DP", []):
+    for therm in data.get("DP", []):
         hc_controller = therm.get("title") == master_name
         preset_mode = "eco" if therm.get("CE") else "comfort"
         hvac_mode = "cool" if therm.get("HC") else "heat"
@@ -229,16 +284,6 @@ def _generate_entities(data: dict) -> list:
             }
         )
     return entities
-
-
-def _get_icon_match_from_login(data: dict, xid: str) -> bool:
-    """Check if icon ID matches login data."""
-    return xid in data["ICONS"]
-
-
-def _verify_set_response(data: dict) -> bool:
-    """Verify the success of set command."""
-    return data.get("WRITE", {}).get("status") == 1
 
 
 class CannotConnect(Exception):
