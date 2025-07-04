@@ -37,7 +37,7 @@ async def async_setup_entry(
     """Set up the climate entities from a config entry."""
     coordinator: IconDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        ClimateDevice(device, coordinator, optimistic=True)
+        ClimateDevice(device, coordinator)
         for device in coordinator.data
         if device["type"] in SUPPORTED_CLIMATE_DEVICES
     )
@@ -50,13 +50,11 @@ class ClimateDevice(CoordinatorEntity[IconDataUpdateCoordinator], ClimateEntity)
         self,
         entity: dict[str, Any],
         coordinator: IconDataUpdateCoordinator,
-        optimistic: bool = True,
     ) -> None:
         """Initialize the climate device."""
         super().__init__(coordinator)
         _LOGGER.info("Setting up: %s", entity)
         self._device = entity
-        self._optimistic = optimistic  # Track if optimistic mode is enabled
         self._attr_unique_id = entity[CONF_ID]
         self._attr_name = entity[CONF_NAME]
         self._attr_temperature_unit = UnitOfTemperature.CELSIUS
@@ -77,8 +75,6 @@ class ClimateDevice(CoordinatorEntity[IconDataUpdateCoordinator], ClimateEntity)
         self._attr_current_temperature = self._device[ATTR_CURRENT_TEMPERATURE]
         self._attr_current_humidity = self._device[ATTR_CURRENT_HUMIDITY]
         self._attr_target_temperature = self._device["target_temperature"]
-        self._attr_max_temp = self._device["target_temperature_max"]
-        self._attr_min_temp = self._device["target_temperature_min"]
         self._attr_preset_mode = self._device[ATTR_PRESET_MODE]
         self._attr_hvac_action = self._device[ATTR_HVAC_ACTION]
         self._attr_hvac_mode = self._device[ATTR_HVAC_MODE]
@@ -98,7 +94,7 @@ class ClimateDevice(CoordinatorEntity[IconDataUpdateCoordinator], ClimateEntity)
         if device:
             self._device = device
             self._initialize_device_state()
-        super()._handle_coordinator_update()
+        self.async_write_ha_state()
 
     async def async_added_to_hass(self) -> None:
         """Handle entity being added to Home Assistant."""
@@ -109,28 +105,15 @@ class ClimateDevice(CoordinatorEntity[IconDataUpdateCoordinator], ClimateEntity)
         """Set a new target HVAC mode."""
         if hvac_mode != self._attr_hvac_mode:
             await self.coordinator.api.async_set_hvac_mode(hvac_mode)
-            if self._optimistic:
-                # Optimistically update the hvac mode immediately
-                self._attr_hvac_mode = hvac_mode
-                self.async_write_ha_state()  # Notify HA about the updated state
-            await sleep(2)
-            if not self._optimistic:
-                await self.coordinator.async_request_refresh()
+            
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Set a new preset mode."""
         if preset_mode != self._attr_preset_mode:
-            await self.coordinator.api.async_set_eco_mode(
+            await self.coordinator.api.async_set_preset_mode(
                 self._attr_unique_id, preset_mode
             )
-            if self._optimistic:
-                # Optimistically update the preset mode immediately
-                self._attr_preset_mode = preset_mode
-                self.async_write_ha_state()  # Notify HA about the updated state
-            await sleep(2)
-            if not self._optimistic:
-                await self.coordinator.async_request_refresh()
-
+            
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set a new target temperature."""
         target_temperature = kwargs.get(ATTR_TEMPERATURE)
@@ -141,10 +124,3 @@ class ClimateDevice(CoordinatorEntity[IconDataUpdateCoordinator], ClimateEntity)
             await self.coordinator.api.async_set_temperature(
                 self._attr_unique_id, target_temperature
             )
-            if self._optimistic:
-                # Optimistically update the target temperature immediately
-                self._attr_target_temperature = target_temperature
-                self.async_write_ha_state()  # Notify HA about the updated state
-            await sleep(2)
-            if not self._optimistic:
-                await self.coordinator.async_request_refresh()

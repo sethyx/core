@@ -3,17 +3,14 @@
     "step": {
       "user": {
         "data": {
-          "email": "[%key:common::config_flow::data::email%]",
-          "password": "[%key:common::config_flow::data::password%]",
+          "ip_address": "[%key:common::config_flow::data::ip_address%]",
           "id": "System ID"
         }
       }
     },
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
-      "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
-      "invalid_id": "Inavlid system ID",
-      "logout_needed": "Logout needed, try again",
+      "invalid_id": "Invalid system ID",
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
